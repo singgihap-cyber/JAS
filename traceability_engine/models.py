@@ -1,0 +1,245 @@
+"""SQLAlchemy 2.0 models for the PT JAS traceability engine.
+
+Implements the entities fixed in DATABASE_DESIGN.md (Phase 2): Batch,
+ProcessEvent, EventBatchLink, QualityTest, StockTransaction, Shipment,
+Supplier, Customer, User, AuditLog.
+
+Only SQLAlchemy-portable types are used (no Postgres-only constructs) so the
+exact same model code runs against SQLite in-memory (tests) and PostgreSQL
+(production) per the stack decision in PROJECT_STATUS.md (2026-09-14).
+Quantities use Numeric (not Float) so reconciliation equality checks are
+exact, never subject to floating-point drift.
+"""
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from .enums import (
+    AuditAction,
+    BatchStatus,
+    BatchType,
+    EventStatus,
+    EventType,
+    LinkRole,
+    QCStage,
+    TransactionDirection,
+    UserRole,
+)
+
+QTY = Numeric(18, 3)  # kg, 3 decimal places -- matches source workbook precision
+
+
+def _enum_column(enum_cls, length: int):
+    """Store as VARCHAR (not a native DB enum type) so SQLite (tests) and
+    PostgreSQL (production) behave identically, while still round-tripping
+    to real Python enum members (unlike a plain String column)."""
+    return SAEnum(enum_cls, native_enum=False, length=length, validate_strings=True)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Supplier(Base):
+    """Master data. `supplier_code` is stored width-agnostic (DATABASE_DESIGN.md
+    §7/8): zero-padding to 2 or 3 digits happens only when assembling/parsing a
+    batch_number string, never here."""
+
+    __tablename__ = "suppliers"
+
+    supplier_id: Mapped[int] = mapped_column(primary_key=True)
+    supplier_code: Mapped[str] = mapped_column(String(8), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    customer_id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    user_id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    role: Mapped[UserRole] = mapped_column(_enum_column(UserRole, 30), default=UserRole.STAFF)
+
+
+class Batch(Base):
+    __tablename__ = "batches"
+
+    batch_id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Business label -- stored both as the assembled string (nullable: the
+    # batch-number generator is NOT implemented yet, see batch_number.py /
+    # PROJECT_STATUS.md blocker) and as parsed components, per
+    # DATABASE_DESIGN.md §1.
+    batch_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    jenis_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    grade_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    supplier_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    receiving_date: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
+    process_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+
+    batch_type: Mapped[BatchType] = mapped_column(_enum_column(BatchType, 20))
+    supplier_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("suppliers.supplier_id"), nullable=True
+    )
+    status: Mapped[BatchStatus] = mapped_column(_enum_column(BatchStatus, 20), default=BatchStatus.ACTIVE)
+
+    current_quantity: Mapped[Decimal] = mapped_column(QTY, default=Decimal("0"))
+    unit: Mapped[str] = mapped_column(String(10), default="kg")
+
+    created_from_event_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("process_events.event_id"), nullable=True
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.user_id"), nullable=True)
+
+    # Packaging-only attributes (batch_type == PACKAGED)
+    plastic_size: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    plastic_lot: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    plastic_qty: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+    carton_lot: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    gross_weight: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+    tare_weight: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+    net_weight: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+
+    supplier: Mapped[Optional["Supplier"]] = relationship()
+    created_from_event: Mapped[Optional["ProcessEvent"]] = relationship(
+        foreign_keys=[created_from_event_id]
+    )
+
+
+class ProcessEvent(Base):
+    __tablename__ = "process_events"
+
+    event_id: Mapped[int] = mapped_column(primary_key=True)
+    event_type: Mapped[EventType] = mapped_column(_enum_column(EventType, 20))
+    event_date: Mapped[dt.date] = mapped_column(Date)
+    event_time: Mapped[Optional[dt.time]] = mapped_column(Time, nullable=True)
+
+    pic_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+
+    shrinkage_qty: Mapped[Decimal] = mapped_column(QTY, default=Decimal("0"))
+    loss_qty: Mapped[Decimal] = mapped_column(QTY, default=Decimal("0"))
+
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[EventStatus] = mapped_column(_enum_column(EventStatus, 10), default=EventStatus.COMPLETED)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.user_id"), nullable=True)
+
+    links: Mapped[list["EventBatchLink"]] = relationship(
+        back_populates="event", foreign_keys="EventBatchLink.event_id"
+    )
+    pic: Mapped["User"] = relationship(foreign_keys=[pic_user_id])
+
+
+class EventBatchLink(Base):
+    """Genealogy edge table (GENEALOGY.md §2/§3). Indexed on (batch_id, role)
+    and (event_id, role) per DATABASE_DESIGN.md §3 -- traversal and
+    reconciliation both filter on these."""
+
+    __tablename__ = "event_batch_links"
+    __table_args__ = (
+        UniqueConstraint("event_id", "batch_id", "role", name="uq_event_batch_role"),
+    )
+
+    link_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("process_events.event_id"), index=True
+    )
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"), index=True)
+    role: Mapped[LinkRole] = mapped_column(_enum_column(LinkRole, 10))
+    quantity: Mapped[Decimal] = mapped_column(QTY)
+    unit: Mapped[str] = mapped_column(String(10), default="kg")
+
+    event: Mapped["ProcessEvent"] = relationship(back_populates="links", foreign_keys=[event_id])
+    batch: Mapped["Batch"] = relationship(foreign_keys=[batch_id])
+
+
+class QualityTest(Base):
+    __tablename__ = "quality_tests"
+
+    test_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"))
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"), index=True)
+    stage: Mapped[QCStage] = mapped_column(_enum_column(QCStage, 4))
+
+    sample_weight: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+    ka_1: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 3), nullable=True)
+    ka_2: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 3), nullable=True)
+    ka_3: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 3), nullable=True)
+    aw: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 3), nullable=True)
+
+    # No numeric acceptance threshold is evaluated here -- confirmed
+    # 2026-09-14 (GENEALOGY.md §5.1). `finding` is a manual PIC judgment.
+    finding: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metal_detection_finding: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class StockTransaction(Base):
+    __tablename__ = "stock_transactions"
+
+    transaction_id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"), index=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"))
+    direction: Mapped[TransactionDirection] = mapped_column(_enum_column(TransactionDirection, 3))
+    quantity: Mapped[Decimal] = mapped_column(QTY)
+    balance_after: Mapped[Decimal] = mapped_column(QTY)
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class Shipment(Base):
+    __tablename__ = "shipments"
+
+    shipment_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"))
+    shipping_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    destination: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    expedition: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    transport_condition: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    packaging_condition: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    coly: Mapped[Optional[int]] = mapped_column(nullable=True)
+    gross_weight: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+    tare_weight: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+    net_weight: Mapped[Optional[Decimal]] = mapped_column(QTY, nullable=True)
+    customer_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("customers.customer_id"), nullable=True
+    )
+    recipient: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    audit_id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(50))
+    entity_id: Mapped[int] = mapped_column()
+    action: Mapped[AuditAction] = mapped_column(_enum_column(AuditAction, 30))
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    timestamp: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    before_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    after_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
