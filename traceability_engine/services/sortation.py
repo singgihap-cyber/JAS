@@ -30,24 +30,22 @@ ambiguity instead of guessing):
 
 2. **Grade code mapping for new output batches**: `Gourmet=01, EG=02,
    EP=03, Powder=05` per the confirmed Grade Master table
-   (`BATCH_NUMBER_SPEC.md` "Resolved by PT JAS"). **`NC` is mapped to
-   grade `04` ("Others") and this mapping is `[UNCONFIRMED]`** --
-   REQUIREMENTS.md's SORT field group lists "Gourmet, EG, EP, NC, Powder"
-   as the five breakdown columns, occupying exactly the slot
-   `Proses.docx`'s Grade Master table calls "Others" (`40`/`04`), but no
-   source document spells out what "NC" stands for. A plausible reading is
-   "Non Conform" (reject-grade material), which is also consistent with
+   (`BATCH_NUMBER_SPEC.md` "Resolved by PT JAS"). **`NC` = "Non Conform"
+   and is mapped to grade `04` ("Others") -- `[CONFIRMED BY USER --
+   2026-09-14]`.** REQUIREMENTS.md's SORT field group lists "Gourmet, EG,
+   EP, NC, Powder" as the five breakdown columns, occupying exactly the
+   slot `Proses.docx`'s Grade Master table calls "Others" (`40`/`04`);
+   the project owner (Tommy) confirmed directly that NC stands for Non
+   Conform (reject-grade material). This is also consistent with
    REQUIREMENTS.md's separate `grind` field group ("source NC batch,
-   starting qty, ... final powder qty") -- i.e. NC-graded Sortation output
-   is exactly what Fase 9's Grinding later consumes. `BATCH_NUMBER_SPEC.md`
-   itself flags `04` as having only one weak, contradicted occurrence in
-   the sample data, so this mapping should be confirmed with Wakhidah (who
-   owns Sortation per `Proses.docx`) before going to production.
+   starting qty, ... final powder qty") -- NC-graded Sortation output is
+   exactly what Fase 9's Grinding later consumes.
 
 3. **New output `batch_type` defaults to `PROCESSED` for Gourmet/EG/EP/NC
-   and `POWDER` for the Powder grade** -- Sortation's "Powder" grade
-   (Grade Master `05`) is already-powder material sorted out directly
-   (distinct from Fase 9 Grinding, which turns NC beans into powder per
+   and `POWDER` for the Powder grade** -- `[CONFIRMED BY USER --
+   2026-09-14]`. Sortation's "Powder" grade (Grade Master `05`) is
+   already-powder material sorted out directly (distinct from Fase 9
+   Grinding, which turns NC beans into powder per
    REQUIREMENTS.md's `grind` field group), so it is typed as `POWDER`
    from the moment Sortation produces it; the other four grades are whole
    dried/green product, typed `PROCESSED` exactly like Fase 3's
@@ -114,12 +112,12 @@ from .events import InputSpec, NewBatchSpec, OutputSpec, record_process_event
 
 ZERO = Decimal("0")
 
-# Grade Master codes (BATCH_NUMBER_SPEC.md "Resolved by PT JAS"). NC -> "04"
-# is [UNCONFIRMED] -- see module docstring #2.
+# Grade Master codes (BATCH_NUMBER_SPEC.md "Resolved by PT JAS"). NC = "Non
+# Conform" -> "04" -- confirmed by user 2026-09-14, see module docstring #2.
 GRADE_GOURMET = "01"
 GRADE_EG = "02"
 GRADE_EP = "03"
-GRADE_NC = "04"  # [UNCONFIRMED] -- see module docstring #2
+GRADE_NC = "04"  # "Non Conform" -- confirmed by user 2026-09-14, see #2
 GRADE_POWDER = "05"
 
 # (attribute name on SortationInput, grade_code, default batch_type) --
@@ -154,7 +152,7 @@ class SortationInput:
     gourmet_qty: Optional[Decimal] = None
     eg_qty: Optional[Decimal] = None
     ep_qty: Optional[Decimal] = None
-    nc_qty: Optional[Decimal] = None  # [UNCONFIRMED] grade mapping -- see #2
+    nc_qty: Optional[Decimal] = None  # "Non Conform" -- see #2
     powder_qty: Optional[Decimal] = None
     process_code: str = "00"  # "00" Original / "01" Upgrade / "02" Downgrade -- see #5
     gourmet_batch_type: Optional[BatchType] = None  # override for #3, if ever needed
