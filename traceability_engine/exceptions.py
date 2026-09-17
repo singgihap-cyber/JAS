@@ -36,3 +36,15 @@ class BatchNumberNotImplementedError(TraceabilityError):
     """Raised by batch_number.generate() -- see BATCH_NUMBER_SPEC.md: the
     AA (Jenis) segment is still [UNCONFIRMED], so the generator must not be
     implemented yet (PROJECT_STATUS.md blocker, carried over from Phase 3)."""
+
+
+class StockReconciliationError(TraceabilityError):
+    """A batch's `current_quantity` cache disagrees with the balance
+    recomputed from its `StockTransaction` ledger (DATABASE_DESIGN.md §1:
+    the ledger, not the cache, is the source of truth). Raised by
+    services/stock.py's reconcile_batch() -- this should never happen in
+    normal operation, since only record_process_event()/record_adjustment()
+    are allowed to touch current_quantity, and both keep it in lockstep
+    with the StockTransaction rows they write; a mismatch means something
+    bypassed the ledger (13_STOCK.md: "do not manually overwrite current
+    stock")."""
