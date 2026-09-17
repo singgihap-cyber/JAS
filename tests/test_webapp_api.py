@@ -238,6 +238,320 @@ def test_batch_number_parse_endpoint(client):
     assert bad.json()["ok"] is False
 
 
+def test_sortation_splits_into_multiple_output_batches(client, supplier_id, pic_id):
+    """services/sortation.py #1: ONE->MANY -- one new output batch per grade
+    quantity > 0 supplied, never a self-loop reuse of the input. Grade code
+    mapping (Gourmet=01/EG=02/EP=03/NC=04/Powder=05, sortation.py #2/#3) and
+    the derived shrinkage (initial - SUM(grades), sortation.py #6) must both
+    come from the engine, not be recomputed by the API layer."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/sortation",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "gourmet_qty": "40.000",
+            "eg_qty": "30.000",
+            "nc_qty": "20.000",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event"]["event_type"] == "SORTATION"
+    assert body["event"]["shrinkage_qty"] == "10.000"  # 100 - (40+30+20)
+    batches = {b["grade_code"]: b for b in body["batches"]}
+    assert set(batches) == {"01", "02", "04"}
+    assert batches["01"]["current_quantity"] == "40.000"
+    assert batches["01"]["batch_type"] == "PROCESSED"
+    assert batches["04"]["batch_type"] == "PROCESSED"  # NC -- still whole product, not Powder
+
+    source = client.get(f"/api/batches/{batch_id}").json()
+    assert source["current_quantity"] == "0.000"
+    assert source["status"] == "CONSUMED"
+
+
+def test_sortation_single_grade_is_reclassify_shape(client, supplier_id, pic_id):
+    """A caller filling in exactly one grade field produces the single-output
+    Downgrade/Upgrade shape -- same function, different call shape
+    (sortation.py #1), no separate endpoint."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/sortation",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "eg_qty": "10.000",
+            "process_code": "02",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert len(r.json()["batches"]) == 1
+    assert r.json()["batches"][0]["process_code"] == "02"
+
+
+def test_sortation_with_no_grade_quantity_is_422(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/sortation",
+        json={"event_date": "2026-09-17", "pic_user_id": pic_id, "batch_id": batch_id},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_input"
+
+
+def test_mixing_combines_two_sources_into_one_batch(client, supplier_id, pic_id):
+    """services/mixing.py #1/#2: cp_qty and shrinkage_qty are both derived,
+    never accepted from the client -- MANY->ONE."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    src_batch = r.json()["batch"]["batch_id"]
+    sort = client.post(
+        "/api/sortation",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": src_batch,
+            "gourmet_qty": "40.000",
+            "eg_qty": "30.000",
+        },
+    )
+    batches = {b["grade_code"]: b["batch_id"] for b in sort.json()["batches"]}
+
+    r = client.post(
+        "/api/mixing",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "sources": [
+                {"batch_id": batches["01"], "quantity": "40.000"},
+                {"batch_id": batches["02"], "quantity": "30.000"},
+            ],
+            "final_qty": "68.000",
+            "product_description": "GOURMET",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event"]["event_type"] == "MIXING"
+    assert body["event"]["shrinkage_qty"] == "2.000"  # cp_qty(70) - final_qty(68)
+    assert body["batch"]["current_quantity"] == "68.000"
+    assert body["batch"]["supplier_code"] == "000"  # unattributable default, mixing.py #5
+    assert body["batch"]["batch_type"] == "PROCESSED"
+
+    for gc in ("01", "02"):
+        consumed = client.get(f"/api/batches/{batches[gc]}").json()
+        assert consumed["current_quantity"] == "0.000"
+        assert consumed["status"] == "CONSUMED"
+
+
+def test_mixing_requires_at_least_two_sources(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/mixing",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": batch_id, "quantity": "10.000"}],
+            "final_qty": "9.000",
+            "product_description": "GOURMET",
+        },
+    )
+    assert r.status_code == 422  # pydantic min_length=2 on `sources`
+
+
+def test_mixing_rejects_duplicate_source_batch_id(client, supplier_id, pic_id):
+    """services/mixing.py #9 -- enforced by the service, surfaced as a clean
+    422 rather than a raw DB integrity error."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/mixing",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "sources": [
+                {"batch_id": batch_id, "quantity": "5.000"},
+                {"batch_id": batch_id, "quantity": "5.000"},
+            ],
+            "final_qty": "9.000",
+            "product_description": "GOURMET",
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_input"
+
+
+def test_grinding_creates_new_powder_batch(client, supplier_id, pic_id):
+    """services/powder.py #5: Grinding always mints a new POWDER batch,
+    grade_code '05' -- ONE->NEW-BATCH, shrinkage derived (starting - final,
+    powder.py #4)."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    src_batch = r.json()["batch"]["batch_id"]
+    sort = client.post(
+        "/api/sortation",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": src_batch,
+            "nc_qty": "20.000",
+        },
+    )
+    nc_batch = sort.json()["batches"][0]["batch_id"]
+    assert sort.json()["batches"][0]["grade_code"] == "04"
+
+    r = client.post(
+        "/api/grinding",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": nc_batch,
+            "final_qty": "15.000",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event"]["event_type"] == "GRINDING"
+    assert body["event"]["shrinkage_qty"] == "5.000"  # 20 (on-hand default) - 15
+    assert body["batch"]["batch_type"] == "POWDER"
+    assert body["batch"]["grade_code"] == "05"
+    assert body["batch"]["current_quantity"] == "15.000"
+
+
+def test_magnetization_and_md_powder_are_stock_neutral_self_loops(client, supplier_id, pic_id):
+    """services/powder.py #9: self-loop ONE->ONE, no QualityTest row -- the
+    finding/notes are recorded in ProcessEvent.notes instead."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "50.000",
+        },
+    )
+    src_batch = r.json()["batch"]["batch_id"]
+    sort = client.post(
+        "/api/sortation",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": src_batch,
+            "nc_qty": "50.000",
+        },
+    )
+    nc_batch = sort.json()["batches"][0]["batch_id"]
+    grind = client.post(
+        "/api/grinding",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": nc_batch,
+            "final_qty": "10.000",
+        },
+    )
+    powder_batch = grind.json()["batch"]["batch_id"]
+
+    mg = client.post(
+        "/api/magnetization",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": powder_batch,
+            "finding": "Tidak Ada",
+        },
+    )
+    assert mg.status_code == 201, mg.text
+    assert mg.json()["quality_test"] is None
+    assert mg.json()["shrinkage_qty"] == "0"
+
+    mdpw = client.post(
+        "/api/md-powder",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": powder_batch,
+            "finding": "Tidak Ada",
+        },
+    )
+    assert mdpw.status_code == 201, mdpw.text
+
+    final = client.get(f"/api/batches/{powder_batch}").json()
+    assert final["current_quantity"] == "10.000"  # unchanged by either inspection
+    event_types = [e["event_type"] for e in final["events"]]
+    assert event_types == ["GRINDING", "MAGNETIZATION", "MD_POWDER"]
+
+
 def test_list_batches_filters_by_status_and_type(client, supplier_id, pic_id):
     client.post(
         "/api/receiving",

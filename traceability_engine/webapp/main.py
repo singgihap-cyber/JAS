@@ -25,7 +25,7 @@ from ..exceptions import (
     UnauthorizedAdjustmentError,
 )
 from .database import init_db
-from .routers import batches, master_data, qc_md, receiving, steam_dry
+from .routers import batches, master_data, mixing, powder, qc_md, receiving, sortation, steam_dry
 
 
 @asynccontextmanager
@@ -83,6 +83,9 @@ app.include_router(master_data.router, prefix=api_prefix)
 app.include_router(receiving.router, prefix=api_prefix)
 app.include_router(qc_md.router, prefix=api_prefix)
 app.include_router(steam_dry.router, prefix=api_prefix)
+app.include_router(sortation.router, prefix=api_prefix)
+app.include_router(mixing.router, prefix=api_prefix)
+app.include_router(powder.router, prefix=api_prefix)
 app.include_router(batches.router, prefix=api_prefix)
 
 _static_dir = Path(__file__).parent / "static"

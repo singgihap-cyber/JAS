@@ -53,7 +53,7 @@ let batches = [];
 // ─── NAVIGATION ─────────────────────────────────────────────────────────
 const PAGE_TITLES = {
     dashboard: 'Dashboard', 'batch-input': 'Penerimaan Barang', proses: 'Input Proses',
-    'batch-list': 'Daftar Batch', 'batch-history': 'Batch History',
+    mixing: 'Mixing', 'batch-list': 'Daftar Batch', 'batch-history': 'Batch History',
     suppliers: 'Data Supplier', users: 'User Management',
 };
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -66,6 +66,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         document.getElementById('pageTitle').textContent = PAGE_TITLES[page] || page;
         if (page === 'batch-list') renderBatchList();
         if (page === 'dashboard') renderDashboard();
+        if (page === 'mixing') renderMixingHistory();
     });
 });
 
@@ -80,15 +81,15 @@ async function loadMasterData() {
 }
 
 function renderSupplierSelect() {
-    const sel = document.getElementById('rSupplier');
-    sel.innerHTML = '<option value="">Pilih supplier...</option>' +
-        suppliers.map(s => `<option value="${s.supplier_id}">${s.supplier_code} — ${s.name}</option>`).join('');
+    const opts = suppliers.map(s => `<option value="${s.supplier_id}">${s.supplier_code} — ${s.name}</option>`).join('');
+    document.getElementById('rSupplier').innerHTML = '<option value="">Pilih supplier...</option>' + opts;
+    document.getElementById('mSupplier').innerHTML = '<option value="">Tidak diatribusikan (default)</option>' + opts;
 }
 
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic'].forEach(id => { document.getElementById(id).innerHTML = opts; });
+    ['rPic', 'pPic', 'mPic'].forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
 function renderSuppliersTable() {
@@ -274,6 +275,50 @@ const STAGE_DEFS = [
         ],
         historyCols: ['final_quantity', 'shrinkage_qty', 'drying_duration'],
     },
+    {
+        key: 'sortation', label: '🧺 Sortasi', endpoint: '/sortation',
+        fields: [
+            { id: 'initial_qty', label: 'Qty Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'gourmet_qty', label: 'Gourmet (kg)', type: 'number', step: '0.001' },
+            { id: 'eg_qty', label: 'EG (kg)', type: 'number', step: '0.001' },
+            { id: 'ep_qty', label: 'EP (kg)', type: 'number', step: '0.001' },
+            { id: 'nc_qty', label: 'NC / Non Conform (kg)', type: 'number', step: '0.001' },
+            { id: 'powder_qty', label: 'Powder (kg)', type: 'number', step: '0.001' },
+            {
+                id: 'process_code', label: 'Jenis Proses — kosongkan = Original', type: 'select',
+                options: [{ value: '00', label: '00 — Original' }, { value: '01', label: '01 — Upgrade' }, { value: '02', label: '02 — Downgrade' }],
+            },
+            { id: 'end_date', label: 'Tanggal Selesai', type: 'date' },
+        ],
+        historyCols: ['shrinkage_qty', 'outputs'],
+    },
+    {
+        key: 'grinding', label: '⚙️ Grinding & Sieving (NC → Powder)', endpoint: '/grinding',
+        fields: [
+            { id: 'starting_qty', label: 'Qty Awal NC (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'final_qty', label: 'Qty Akhir Powder (kg)', type: 'number', step: '0.001', required: true },
+            { id: 'result_date', label: 'Tanggal Hasil', type: 'date' },
+        ],
+        historyCols: ['final_quantity', 'shrinkage_qty', 'outputs'],
+    },
+    {
+        key: 'magnetization', label: '🧲 Magnetization (MG)', endpoint: '/magnetization',
+        fields: [
+            { id: 'quantity', label: 'Quantity (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'finding', label: 'Temuan (TEMUAN)', type: 'text' },
+            { id: 'notes', label: 'Keterangan', type: 'text' },
+        ],
+        historyCols: ['finding', 'notes'],
+    },
+    {
+        key: 'md_powder', label: '🧲 Metal Detection Powder (MDPW)', endpoint: '/md-powder',
+        fields: [
+            { id: 'quantity', label: 'Quantity (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'finding', label: 'Temuan (TEMUAN)', type: 'text' },
+            { id: 'notes', label: 'Keterangan', type: 'text' },
+        ],
+        historyCols: ['finding', 'notes'],
+    },
 ];
 
 function stageByKey(k) { return STAGE_DEFS.find(s => s.key === k); }
@@ -282,13 +327,19 @@ function renderStageSelect() {
     document.getElementById('pTahap').innerHTML = STAGE_DEFS.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
 }
 
+function activeBatchOptionsHtml() {
+    const active = batches.filter(b => b.status === 'ACTIVE');
+    return active.length
+        ? active.map(b =>
+            `<option value="${b.batch_id}">#${b.batch_id} ${b.batch_number || ''} — ${b.batch_type} (${fmtQty(b.current_quantity)} kg)</option>`).join('')
+        : '';
+}
+
 function renderBatchSelect() {
     const sel = document.getElementById('pBatch');
-    const active = batches.filter(b => b.status === 'ACTIVE');
-    sel.innerHTML = active.length
-        ? '<option value="">Pilih batch...</option>' + active.map(b =>
-            `<option value="${b.batch_id}">#${b.batch_id} ${b.batch_number || ''} — ${b.batch_type} (${fmtQty(b.current_quantity)} kg)</option>`).join('')
-        : '<option value="">Tidak ada batch aktif</option>';
+    const opts = activeBatchOptionsHtml();
+    sel.innerHTML = opts ? '<option value="">Pilih batch...</option>' + opts : '<option value="">Tidak ada batch aktif</option>';
+    refreshMixSourceOptions();
 }
 
 function renderProsesFields() {
@@ -304,8 +355,11 @@ function renderProsesFields() {
             const req = f.required ? ' <span style="color:var(--danger)">*</span>' : '';
             let input;
             if (f.type === 'select') {
+                const optHtml = f.options.map(o => typeof o === 'string'
+                    ? `<option value="${o}">${o}</option>`
+                    : `<option value="${o.value}">${o.label}</option>`).join('');
                 input = `<select class="form-select" id="pf_${f.id}"${f.required ? ' required' : ''}>
-                    <option value="">Pilih...</option>${f.options.map(o => `<option value="${o}">${o}</option>`).join('')}</select>`;
+                    <option value="">Pilih...</option>${optHtml}</select>`;
             } else {
                 input = `<input type="${f.type}" class="form-input" id="pf_${f.id}" step="${f.step || 'any'}"
                     placeholder="${f.placeholder || ''}"${f.required ? ' required' : ''}>`;
@@ -319,15 +373,27 @@ async function renderProsesHistory() {
     const def = stageByKey(document.getElementById('pTahap').value);
     if (!def) return;
     document.getElementById('prosesRiwayatTitle').textContent = `📊 Riwayat ${def.label}`;
-    const eventTypeMap = { qc_test: 'QC_TEST', metal_detection: 'METAL_DETECTION', steaming: 'STEAMING', sundrying: 'SUNDRYING' };
+    const eventTypeMap = {
+        qc_test: 'QC_TEST', metal_detection: 'METAL_DETECTION', steaming: 'STEAMING', sundrying: 'SUNDRYING',
+        sortation: 'SORTATION', grinding: 'GRINDING', magnetization: 'MAGNETIZATION', md_powder: 'MD_POWDER',
+    };
     const events = await api('GET', `/process-events?event_type=${eventTypeMap[def.key]}`);
     document.getElementById('prosesTableHead').innerHTML =
         '<th>Tanggal</th><th>Batch</th>' + def.historyCols.map(c => `<th>${c}</th>`).join('') + '<th>PIC</th>';
     document.getElementById('prosesTable').innerHTML = events.length ? events.slice(0, 30).map(ev => {
-        const batchId = (ev.links.find(l => l.role === 'OUTPUT') || ev.links[0] || {}).batch_id;
+        // Prefer the INPUT link's batch (the batch the stage was performed
+        // on) as the row's identifying "Batch" column; self-loop stages
+        // (QC/MD/Steam/Dry/Magnetization/MDPW) have INPUT===OUTPUT so this
+        // is unchanged for them, while Sortation/Grinding now show the
+        // source batch rather than an arbitrary first OUTPUT.
+        const batchId = (ev.links.find(l => l.role === 'INPUT') || ev.links.find(l => l.role === 'OUTPUT') || {}).batch_id;
         const cellFor = (col) => {
             if (col === 'shrinkage_qty') return fmtQty(ev.shrinkage_qty);
             if (col === 'final_quantity') { const l = ev.links.find(l => l.role === 'OUTPUT'); return l ? fmtQty(l.quantity) : '–'; }
+            if (col === 'outputs') {
+                const outs = ev.links.filter(l => l.role === 'OUTPUT');
+                return outs.length ? outs.map(l => `#${l.batch_id} (${fmtQty(l.quantity)})`).join(', ') : '–';
+            }
             if (ev.quality_test && col in ev.quality_test) return ev.quality_test[col] ?? '–';
             const notes = ev.notes ? safeParse(ev.notes) : {};
             return notes[col] ?? '–';
@@ -366,12 +432,140 @@ document.getElementById('prosesForm').addEventListener('submit', async (e) => {
     }
     try {
         const result = await api('POST', def.endpoint, payload);
-        toast(`✅ ${def.label} untuk batch #${batchId} tersimpan.`, 'success');
+        let extra = '';
+        if (result && Array.isArray(result.batches) && result.batches.length) {
+            extra = ' → batch baru ' + result.batches.map(b => `#${b.batch_id}`).join(', ');
+        } else if (result && result.batch && result.batch.batch_id) {
+            extra = ` → batch baru #${result.batch.batch_id}`;
+        }
+        toast(`✅ ${def.label} untuk batch #${batchId} tersimpan.${extra}`, 'success');
         document.getElementById('prosesForm').reset();
         renderProsesFields();
         await refreshBatches();
     } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
 });
+
+// ─── MIXING (MANY->ONE, own form -- see services/mixing.py) ────────────
+// Doesn't fit the single-batch "Input Proses" selector (STAGE_DEFS above):
+// Mixing takes N (>=2) source batches with a per-source quantity. This
+// section is still thin -- `cp_qty` and `shrinkage_qty` are never computed
+// here, only ever displayed from the API response (mixing.py #1/#2).
+let mixSourceSeq = 0;
+
+function mixSourceRowHtml(rowId) {
+    return `<div class="form-row mix-source-row" data-row-id="${rowId}" style="align-items:end">
+        <div class="form-group">
+            <label class="form-label">Batch Sumber</label>
+            <select class="form-select mix-src-batch" id="mixSrcBatch${rowId}"><option value="">Pilih batch...</option></select>
+        </div>
+        <div class="form-group" style="display:flex;gap:8px;align-items:end">
+            <div style="flex:1">
+                <label class="form-label">Qty (kg)</label>
+                <input type="number" class="form-input mix-src-qty" id="mixSrcQty${rowId}" step="0.001" min="0">
+            </div>
+            <button type="button" class="btn btn-secondary btn-small mix-src-remove">✕</button>
+        </div>
+    </div>`;
+}
+
+function addMixSourceRow() {
+    mixSourceSeq += 1;
+    const host = document.getElementById('mixSources');
+    host.insertAdjacentHTML('beforeend', mixSourceRowHtml(mixSourceSeq));
+    const row = host.lastElementChild;
+    row.querySelector('.mix-src-batch').innerHTML = '<option value="">Pilih batch...</option>' + activeBatchOptionsHtml();
+    row.querySelector('.mix-src-remove').addEventListener('click', () => {
+        if (host.children.length <= 2) { toast('Mixing butuh minimal 2 batch sumber.', 'error'); return; }
+        row.remove();
+    });
+}
+
+function initMixSources() {
+    const host = document.getElementById('mixSources');
+    host.innerHTML = '';
+    mixSourceSeq = 0;
+    addMixSourceRow();
+    addMixSourceRow();
+}
+
+function refreshMixSourceOptions() {
+    const host = document.getElementById('mixSources');
+    if (!host) return;
+    const opts = activeBatchOptionsHtml();
+    host.querySelectorAll('.mix-src-batch').forEach(sel => {
+        const current = sel.value;
+        sel.innerHTML = '<option value="">Pilih batch...</option>' + opts;
+        if (current) sel.value = current;
+    });
+}
+
+document.getElementById('mixAddSource').addEventListener('click', addMixSourceRow);
+document.getElementById('mixingForm').addEventListener('reset', () => setTimeout(initMixSources, 0));
+document.getElementById('mTanggal').value = todayStr();
+
+document.getElementById('mixingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const picId = document.getElementById('mPic').value;
+    if (!picId) { toast('PIC harus dipilih.', 'error'); return; }
+
+    const sources = [];
+    document.querySelectorAll('#mixSources .mix-source-row').forEach(row => {
+        const batchId = row.querySelector('.mix-src-batch').value;
+        const qty = row.querySelector('.mix-src-qty').value;
+        if (batchId && qty) sources.push({ batch_id: Number(batchId), quantity: qty });
+    });
+    if (sources.length < 2) { toast('Isi minimal 2 batch sumber beserta qty-nya.', 'error'); return; }
+    const batchIds = sources.map(s => s.batch_id);
+    if (new Set(batchIds).size !== batchIds.length) { toast('Batch sumber tidak boleh duplikat.', 'error'); return; }
+
+    const finalQty = document.getElementById('mFinalQty').value;
+    if (!finalQty || Number(finalQty) <= 0) { toast('Qty akhir harus lebih dari 0.', 'error'); return; }
+
+    const payload = {
+        event_date: document.getElementById('mTanggal').value,
+        pic_user_id: Number(picId),
+        sources,
+        final_qty: finalQty,
+        product_description: document.getElementById('mDesc').value.trim(),
+    };
+    const batchType = document.getElementById('mBatchType').value;
+    if (batchType) payload.batch_type = batchType;
+    const grade = document.getElementById('mGrade').value.trim();
+    if (grade) payload.grade_code = grade;
+    const jenis = document.getElementById('mJenis').value.trim();
+    if (jenis) payload.jenis_code = jenis;
+    const supplierId = document.getElementById('mSupplier').value;
+    if (supplierId) payload.supplier_id = Number(supplierId);
+
+    try {
+        const result = await api('POST', '/mixing', payload);
+        toast(`✅ Mixing tersimpan — batch baru #${result.batch.batch_id} (${fmtQty(result.batch.current_quantity)} kg)`, 'success', 5000);
+        document.getElementById('mixingForm').reset();
+        document.getElementById('mTanggal').value = todayStr();
+        initMixSources();
+        await refreshBatches();
+        await renderMixingHistory();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+async function renderMixingHistory() {
+    const events = await api('GET', '/process-events?event_type=MIXING');
+    document.getElementById('mixingTable').innerHTML = events.length ? events.slice(0, 30).map(ev => {
+        const sourcesTxt = ev.links.filter(l => l.role === 'INPUT').map(l => `#${l.batch_id} (${fmtQty(l.quantity)})`).join(', ');
+        const outputLink = ev.links.find(l => l.role === 'OUTPUT');
+        const notes = ev.notes ? safeParse(ev.notes) : {};
+        return `<tr>
+            <td>${ev.event_date}</td>
+            <td>${sourcesTxt || '–'}</td>
+            <td class="batch-id">${outputLink ? '#' + outputLink.batch_id : '–'}</td>
+            <td>${notes.cp_qty != null ? fmtQty(notes.cp_qty) : '–'}</td>
+            <td>${outputLink ? fmtQty(outputLink.quantity) : '–'}</td>
+            <td>${fmtQty(ev.shrinkage_qty)}</td>
+            <td>${notes.product_description || '–'}</td>
+            <td>${picName(ev.pic_user_id)}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada data Mixing</td></tr>';
+}
 
 // ─── BATCH LIST ─────────────────────────────────────────────────────────
 async function renderBatchList() {
@@ -451,6 +645,7 @@ async function boot() {
     const statusEl = document.getElementById('apiStatus');
     try {
         renderStageSelect();
+        initMixSources();
         await loadMasterData();
         await refreshBatches();
         await renderDashboard();

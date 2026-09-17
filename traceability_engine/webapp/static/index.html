@@ -8,11 +8,12 @@
 </head>
 <body>
 <div class="sidebar">
-    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 1</small></div>
+    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 2</small></div>
     <div class="nav">
         <button class="nav-item active" data-page="dashboard">📊 Dashboard</button>
         <button class="nav-item" data-page="batch-input">📥 Penerimaan Barang</button>
         <button class="nav-item" data-page="proses">⚙️ Input Proses</button>
+        <button class="nav-item" data-page="mixing">🥣 Mixing</button>
         <button class="nav-item" data-page="batch-list">📋 Daftar Batch</button>
         <button class="nav-item" data-page="batch-history">🔍 Batch History</button>
         <button class="nav-item" data-page="suppliers">🏭 Data Supplier</button>
@@ -32,11 +33,11 @@
             <div class="section">
                 <div class="section-title">📈 Ringkasan Batch Aktif</div>
                 <div class="info-box">
-                    Slice pertama Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming,
-                    Sundrying</strong> sudah tersambung penuh ke engine. Tahap lain (Sortasi, Mixing, Powder,
-                    Rework, Vacuum/Packing, Delivery, Stock, Traceability) menyusul di sesi berikutnya —
-                    struktur router/halaman ini memang dirancang supaya tahap baru cukup ditambahkan, bukan
-                    dibangun ulang.
+                    Slice 1+2 Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming, Sundrying,
+                    Sortasi, Mixing, Grinding &amp; Sieving, Magnetization, Metal Detection Powder</strong> sudah
+                    tersambung penuh ke engine. Tahap lain (Rework, Vacuum/Packing, Delivery, Stock,
+                    Traceability, Adjustment) menyusul di sesi berikutnya — struktur router/halaman ini memang
+                    dirancang supaya tahap baru cukup ditambahkan, bukan dibangun ulang.
                 </div>
                 <div class="table-container">
                     <table>
@@ -187,6 +188,95 @@
                     <table>
                         <thead><tr id="prosesTableHead"></tr></thead>
                         <tbody id="prosesTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- MIXING (MANY->ONE -- own form, doesn't fit the single-batch Input Proses selector) -->
+        <div class="page" id="mixing">
+            <div class="section">
+                <div class="section-title">🥣 Mixing (Gabung Batch)</div>
+                <div class="info-box">
+                    Menggabungkan <strong>dua atau lebih</strong> batch sumber menjadi satu batch baru. <code>QTY
+                    CP (KG)</code> dan penyusutan dihitung otomatis oleh engine dari total qty sumber dan berat
+                    akhir yang diinput — tidak dihitung di form ini (services/mixing.py #1/#2).
+                </div>
+                <form id="mixingForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Tanggal <span style="color:var(--danger)">*</span></label>
+                            <input type="date" class="form-input" id="mTanggal" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">PIC <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="mPic" required></select>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">🔗 Batch Sumber (minimal 2)</div>
+                    <div id="mixSources"></div>
+                    <button type="button" class="btn btn-secondary btn-small" id="mixAddSource" style="margin-bottom:12px">+ Tambah Sumber Batch</button>
+
+                    <div class="form-divider">⚖️ Hasil Gabungan</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Qty Akhir (kg) <span style="color:var(--danger)">*</span></label>
+                            <input type="number" class="form-input" id="mFinalQty" step="0.001" min="0" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Deskripsi Produk <span style="color:var(--danger)">*</span></label>
+                            <input class="form-input" id="mDesc" placeholder="mis. GOURMET" required>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">⚙️ Opsional (kosongkan untuk default engine)</div>
+                    <div class="info-box">
+                        Kosongkan Supplier untuk default "batch tidak bisa diatribusikan ke satu supplier"
+                        (kode <code>000</code>) — sesuai services/mixing.py #5. Jenis/Grade tidak pernah diwariskan
+                        otomatis dari sumber karena satu event Mixing bisa menggabungkan Jenis berbeda
+                        (services/mixing.py #4).
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Alur Hasil (Batch Type)</label>
+                            <select class="form-select" id="mBatchType">
+                                <option value="">PROCESSED (default)</option>
+                                <option value="RAW_KERING">RAW_KERING</option>
+                                <option value="RAW_HIJAU">RAW_HIJAU</option>
+                                <option value="PROCESSED">PROCESSED</option>
+                                <option value="POWDER">POWDER</option>
+                                <option value="PACKAGED">PACKAGED</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Grade Code</label>
+                            <input class="form-input" id="mGrade" placeholder="mis. 01 (opsional)">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Jenis Code</label>
+                            <input class="form-input" id="mJenis" placeholder="opsional">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Supplier (jika satu supplier)</label>
+                            <select class="form-select" id="mSupplier"><option value="">Tidak diatribusikan (default)</option></select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Simpan Mixing</button>
+                        <button type="reset" class="btn btn-secondary" id="mixResetBtn">Reset</button>
+                    </div>
+                </form>
+            </div>
+            <div class="section">
+                <div class="section-title">📊 Riwayat Mixing</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Tanggal</th><th>Sumber</th><th>Batch Gabungan</th><th>CP Qty</th><th>Qty Akhir</th><th>Susut</th><th>Deskripsi</th><th>PIC</th></tr></thead>
+                        <tbody id="mixingTable"></tbody>
                     </table>
                 </div>
             </div>

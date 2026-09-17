@@ -193,6 +193,96 @@ class SundryingCreate(BaseModel):
     drying_duration: Optional[str] = None
 
 
+# ------------------------------------------------------------------ sortation
+class SortationCreate(BaseModel):
+    event_date: dt.date  # SORT "start date"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    initial_qty: Optional[Decimal] = None  # default: batch on-hand -- services/sortation.py #7
+    unit: str = "kg"
+    end_date: Optional[dt.date] = None  # SORT "end date" -- notes only, sortation.py #8
+    gourmet_qty: Optional[Decimal] = None
+    eg_qty: Optional[Decimal] = None
+    ep_qty: Optional[Decimal] = None
+    nc_qty: Optional[Decimal] = None  # "Non Conform" -- sortation.py #2
+    powder_qty: Optional[Decimal] = None
+    process_code: str = "00"  # "00" Original / "01" Upgrade / "02" Downgrade -- sortation.py #5
+
+
+class SortationResult(BaseModel):
+    event: ProcessEventOut
+    batches: list[BatchOut]  # one per grade quantity > 0 supplied -- ONE->MANY, sortation.py #1
+
+
+# ---------------------------------------------------------------------- mixing
+class MixingSourceCreate(BaseModel):
+    batch_id: int
+    quantity: Decimal  # MIX "QTY ASAL (KG)" for this source -- required per source, mixing.py #10
+
+
+class MixingCreate(BaseModel):
+    event_date: dt.date  # MIX "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    sources: list[MixingSourceCreate] = Field(..., min_length=2)  # mixing.py #9
+    final_qty: Decimal  # MIX "QTY AKHIR (KG)" -- required, mixing.py #3
+    product_description: str  # MIX "DESKRIPSI PRODUK" -- notes only, mixing.py #8
+    unit: str = "kg"
+    grade_code: Optional[str] = None  # explicit override only, never inferred -- mixing.py #8
+    jenis_code: Optional[str] = None  # never inherited automatically -- mixing.py #4
+    supplier_id: Optional[int] = None  # default: unattributable -- mixing.py #5
+    supplier_code: str = "000"  # see mixing.py #5
+    batch_type: Literal["RAW_KERING", "RAW_HIJAU", "PROCESSED", "POWDER", "PACKAGED"] = "PROCESSED"
+
+
+class MixingResult(BaseModel):
+    event: ProcessEventOut
+    batch: BatchOut  # single combined output batch -- MANY->ONE
+
+
+# --------------------------------------------------------------------- powder
+class GrindingCreate(BaseModel):
+    event_date: dt.date  # grind "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int  # grind "BATCH NUMBER ASAL" (source NC batch) -- named batch_id here to match
+    # the generic Proses form's single-batch selector (see app.js STAGE_DEFS);
+    # the router maps it onto services.powder.GrindingInput.nc_batch_id.
+    final_qty: Decimal  # grind "QTY AKHIR POWDER (KG)" -- required, powder.py #3
+    starting_qty: Optional[Decimal] = None  # default: batch on-hand -- powder.py #2
+    unit: str = "kg"
+    result_date: Optional[dt.date] = None  # grind "TANGGAL HASIL" -- notes only, powder.py #1
+    process_code: Optional[str] = None  # [UNCONFIRMED] -- powder.py #7
+
+
+class GrindingResult(BaseModel):
+    event: ProcessEventOut
+    batch: BatchOut  # newly minted Powder batch -- ONE->NEW-BATCH
+
+
+class MagnetizationCreate(BaseModel):
+    event_date: dt.date  # MG "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    quantity: Optional[Decimal] = None  # default: batch on-hand -- powder.py #10
+    unit: str = "kg"
+    finding: Optional[str] = None  # MG "TEMUAN"
+    notes: Optional[str] = None  # MG "KETERANGAN"
+
+
+class MDPowderCreate(BaseModel):
+    event_date: dt.date  # MDPW "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    quantity: Optional[Decimal] = None  # default: batch on-hand -- powder.py #10
+    unit: str = "kg"
+    finding: Optional[str] = None  # MDPW "TEMUAN"
+    notes: Optional[str] = None  # MDPW "KETERANGAN"
+
+
 # ------------------------------------------------------------------- errors
 class ErrorOut(BaseModel):
     error: str
