@@ -63,6 +63,17 @@ class BatchOut(BaseModel):
     current_quantity: Decimal
     unit: str
     created_at: dt.datetime
+    # Packaging attributes -- only ever populated for batch_type=PACKAGED
+    # (Packing, Fase 15 slice 3) and Vacuum's plastic-line notes stay on the
+    # ProcessEvent, not the Batch (services/vacuum_packing.py #1/#3). Pure
+    # read-side exposure of existing Batch columns, no new rule here.
+    plastic_size: Optional[str] = None
+    plastic_lot: Optional[str] = None
+    plastic_qty: Optional[Decimal] = None
+    carton_lot: Optional[str] = None
+    gross_weight: Optional[Decimal] = None
+    tare_weight: Optional[Decimal] = None
+    net_weight: Optional[Decimal] = None
 
 
 class EventBatchLinkOut(BaseModel):
@@ -281,6 +292,82 @@ class MDPowderCreate(BaseModel):
     unit: str = "kg"
     finding: Optional[str] = None  # MDPW "TEMUAN"
     notes: Optional[str] = None  # MDPW "KETERANGAN"
+
+
+# --------------------------------------------------------------------- rework
+class ReworkCreate(BaseModel):
+    event_date: dt.date  # REW "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int  # REW "BATCH NUMBER"
+    starting_qty: Optional[Decimal] = None  # default: batch on-hand -- rework.py #6
+    unit: str = "kg"
+    process_description: Optional[str] = None  # REW "KETERANGAN PROSES" -- notes only, rework.py #8
+    gourmet_qty: Optional[Decimal] = None
+    eg_qty: Optional[Decimal] = None
+    ep_qty: Optional[Decimal] = None
+    nc_qty: Optional[Decimal] = None  # "Non Conform" -- sortation.py #2
+
+
+class ReworkResult(BaseModel):
+    event: ProcessEventOut
+    batches: list[BatchOut]  # one per grade quantity > 0 supplied -- ONE->MANY, rework.py
+
+
+# --------------------------------------------------------------- vacuum/packing
+class VacuumPlasticLineCreate(BaseModel):
+    total_weight: Decimal  # required, drives event quantity -- vacuum_packing.py #2
+    plastic_size: Optional[str] = None
+    plastic_lot: Optional[str] = None
+    plastic_qty: Optional[Decimal] = None
+    weight_per_pack: Optional[Decimal] = None
+
+
+class VacuumCreate(BaseModel):
+    event_date: dt.date  # VC "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int  # self-loop, no new batch minted -- vacuum_packing.py #1
+    plastic_lines: list[VacuumPlasticLineCreate] = Field(..., min_length=1)  # #3
+    unit: str = "kg"
+    product_description: Optional[str] = None  # VC "DESKRIPSI PRODUK" -- notes only, #4
+    buyer: Optional[str] = None  # VC "BUYER" -- notes only, #4
+
+
+class PackingSourceCreate(BaseModel):
+    batch_id: int
+    quantity: Decimal  # PACK "BERAT (KG)" for this source line -- required, #5
+
+
+class PackingCreate(BaseModel):
+    event_date: dt.date  # PACK "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    sources: list[PackingSourceCreate] = Field(..., min_length=1)  # #5
+    gross_weight: Decimal  # PACK "BRUTO" -- required, net/tare derived server-side, #6/#7
+    unit: str = "kg"
+    plastic_size: Optional[str] = None  # PACK "UKURAN PLASTIK VACCUM" -- #8
+    plastic_lot: Optional[str] = None  # PACK "LOT NO. PLASTIK VACUM"
+    plastic_qty: Optional[Decimal] = None  # PACK "QTY PLASTIK VACUM"
+    carton_lot: Optional[str] = None  # PACK "LOT NO. KARTON"
+    carton_qty: Optional[Decimal] = None  # PACK "QTY KARTON (COLY)" -- notes only, #9
+    envelope_qty: Optional[Decimal] = None  # PACK "AMPLOP" -- notes only, #9
+    shipping_number: Optional[str] = None  # PACK "NOMOR PENGIRIMAN" -- notes only, #10
+    destination: Optional[str] = None  # PACK "TUJUAN PENGIRIMAN" -- notes only, #10
+    product_description: Optional[str] = None  # PACK "DESKRIPSI PRODUK" -- notes only, #11
+    buyer: Optional[str] = None  # PACK "PEMBELI" -- notes only, #11
+    grade_code: Optional[str] = None  # inherited if single-source, else explicit only -- #12
+    jenis_code: Optional[str] = None
+    supplier_id: Optional[int] = None
+    supplier_code: Optional[str] = None
+    receiving_date: Optional[dt.date] = None
+    process_code: Optional[str] = None  # [UNCONFIRMED] -- #13
+    batch_type: Literal["RAW_KERING", "RAW_HIJAU", "PROCESSED", "POWDER", "PACKAGED"] = "PACKAGED"
+
+
+class PackingResult(BaseModel):
+    event: ProcessEventOut
+    batch: BatchOut  # single new PACKAGED batch -- ONE-or-MANY->ONE
 
 
 # ------------------------------------------------------------------- errors

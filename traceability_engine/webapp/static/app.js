@@ -53,7 +53,7 @@ let batches = [];
 // ─── NAVIGATION ─────────────────────────────────────────────────────────
 const PAGE_TITLES = {
     dashboard: 'Dashboard', 'batch-input': 'Penerimaan Barang', proses: 'Input Proses',
-    mixing: 'Mixing', 'batch-list': 'Daftar Batch', 'batch-history': 'Batch History',
+    mixing: 'Mixing', 'vacuum-packing': 'Vacuum & Packing', 'batch-list': 'Daftar Batch', 'batch-history': 'Batch History',
     suppliers: 'Data Supplier', users: 'User Management',
 };
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -67,6 +67,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'batch-list') renderBatchList();
         if (page === 'dashboard') renderDashboard();
         if (page === 'mixing') renderMixingHistory();
+        if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
     });
 });
 
@@ -84,12 +85,13 @@ function renderSupplierSelect() {
     const opts = suppliers.map(s => `<option value="${s.supplier_id}">${s.supplier_code} — ${s.name}</option>`).join('');
     document.getElementById('rSupplier').innerHTML = '<option value="">Pilih supplier...</option>' + opts;
     document.getElementById('mSupplier').innerHTML = '<option value="">Tidak diatribusikan (default)</option>' + opts;
+    document.getElementById('pkSupplier').innerHTML = '<option value="">Tidak diisi (warisi dari sumber jika 1)</option>' + opts;
 }
 
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic'].forEach(id => { document.getElementById(id).innerHTML = opts; });
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic'].forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
 function renderSuppliersTable() {
@@ -319,6 +321,18 @@ const STAGE_DEFS = [
         ],
         historyCols: ['finding', 'notes'],
     },
+    {
+        key: 'rework', label: '🔁 Rework (Olah Ulang)', endpoint: '/rework',
+        fields: [
+            { id: 'starting_qty', label: 'Qty Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'gourmet_qty', label: 'Gourmet (kg)', type: 'number', step: '0.001' },
+            { id: 'eg_qty', label: 'EG (kg)', type: 'number', step: '0.001' },
+            { id: 'ep_qty', label: 'EP (kg)', type: 'number', step: '0.001' },
+            { id: 'nc_qty', label: 'NC / Non Conform (kg)', type: 'number', step: '0.001' },
+            { id: 'process_description', label: 'Keterangan Proses', type: 'text' },
+        ],
+        historyCols: ['shrinkage_qty', 'outputs'],
+    },
 ];
 
 function stageByKey(k) { return STAGE_DEFS.find(s => s.key === k); }
@@ -338,8 +352,12 @@ function activeBatchOptionsHtml() {
 function renderBatchSelect() {
     const sel = document.getElementById('pBatch');
     const opts = activeBatchOptionsHtml();
-    sel.innerHTML = opts ? '<option value="">Pilih batch...</option>' + opts : '<option value="">Tidak ada batch aktif</option>';
+    const html = opts ? '<option value="">Pilih batch...</option>' + opts : '<option value="">Tidak ada batch aktif</option>';
+    sel.innerHTML = html;
+    const vSel = document.getElementById('vBatch');
+    if (vSel) vSel.innerHTML = html;
     refreshMixSourceOptions();
+    refreshPackingSourceOptions();
 }
 
 function renderProsesFields() {
@@ -376,6 +394,7 @@ async function renderProsesHistory() {
     const eventTypeMap = {
         qc_test: 'QC_TEST', metal_detection: 'METAL_DETECTION', steaming: 'STEAMING', sundrying: 'SUNDRYING',
         sortation: 'SORTATION', grinding: 'GRINDING', magnetization: 'MAGNETIZATION', md_powder: 'MD_POWDER',
+        rework: 'REWORK',
     };
     const events = await api('GET', `/process-events?event_type=${eventTypeMap[def.key]}`);
     document.getElementById('prosesTableHead').innerHTML =
@@ -567,6 +586,245 @@ async function renderMixingHistory() {
     }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada data Mixing</td></tr>';
 }
 
+// ─── VACUUM (self-loop ONE->ONE, own form -- dynamic plastic-line list,
+// see services/vacuum_packing.py #1/#2/#3) ─────────────────────────────
+let vacLineSeq = 0;
+
+function vacLineRowHtml(rowId) {
+    return `<div class="form-row vac-line-row" data-row-id="${rowId}" style="align-items:end">
+        <div class="form-group">
+            <label class="form-label">Ukuran Plastik</label>
+            <input class="form-input vac-line-size" id="vacLineSize${rowId}" placeholder="mis. 25x37.5">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Lot Plastik</label>
+            <input class="form-input vac-line-lot" id="vacLineLot${rowId}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Qty Plastik (pcs)</label>
+            <input type="number" class="form-input vac-line-qty" id="vacLineQty${rowId}" step="1" min="0">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Berat/Pack (kg)</label>
+            <input type="number" class="form-input vac-line-perpack" id="vacLinePerPack${rowId}" step="0.001" min="0">
+        </div>
+        <div class="form-group" style="display:flex;gap:8px;align-items:end">
+            <div style="flex:1">
+                <label class="form-label">Berat Total (kg) <span style="color:var(--danger)">*</span></label>
+                <input type="number" class="form-input vac-line-total" id="vacLineTotal${rowId}" step="0.001" min="0" required>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small vac-line-remove">✕</button>
+        </div>
+    </div>`;
+}
+
+function addVacLine() {
+    vacLineSeq += 1;
+    const host = document.getElementById('vacLines');
+    host.insertAdjacentHTML('beforeend', vacLineRowHtml(vacLineSeq));
+    const row = host.lastElementChild;
+    row.querySelector('.vac-line-remove').addEventListener('click', () => {
+        if (host.children.length <= 1) { toast('Vacuum butuh minimal 1 baris plastik.', 'error'); return; }
+        row.remove();
+    });
+}
+
+function initVacLines() {
+    const host = document.getElementById('vacLines');
+    host.innerHTML = '';
+    vacLineSeq = 0;
+    addVacLine();
+}
+
+document.getElementById('vacAddLine').addEventListener('click', addVacLine);
+document.getElementById('vacuumForm').addEventListener('reset', () => setTimeout(initVacLines, 0));
+document.getElementById('vTanggal').value = todayStr();
+
+document.getElementById('vacuumForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const picId = document.getElementById('vPic').value;
+    const batchId = document.getElementById('vBatch').value;
+    if (!picId || !batchId) { toast('Batch dan PIC harus dipilih.', 'error'); return; }
+
+    const plastic_lines = [];
+    document.querySelectorAll('#vacLines .vac-line-row').forEach(row => {
+        const total = row.querySelector('.vac-line-total').value;
+        if (!total) return;
+        plastic_lines.push({
+            total_weight: total,
+            plastic_size: row.querySelector('.vac-line-size').value.trim() || null,
+            plastic_lot: row.querySelector('.vac-line-lot').value.trim() || null,
+            plastic_qty: row.querySelector('.vac-line-qty').value || null,
+            weight_per_pack: row.querySelector('.vac-line-perpack').value || null,
+        });
+    });
+    if (!plastic_lines.length) { toast('Isi minimal 1 baris plastik dengan Berat Total.', 'error'); return; }
+
+    const payload = {
+        event_date: document.getElementById('vTanggal').value,
+        pic_user_id: Number(picId),
+        batch_id: Number(batchId),
+        plastic_lines,
+        product_description: document.getElementById('vDesc').value.trim() || null,
+        buyer: document.getElementById('vBuyer').value.trim() || null,
+    };
+    try {
+        const result = await api('POST', '/vacuum', payload);
+        const outLink = result.links.find(l => l.role === 'OUTPUT');
+        toast(`✅ Vacuum tersimpan — total ${outLink ? fmtQty(outLink.quantity) : ''} kg`, 'success', 5000);
+        document.getElementById('vacuumForm').reset();
+        document.getElementById('vTanggal').value = todayStr();
+        initVacLines();
+        await refreshBatches();
+        await renderVacuumHistory();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+async function renderVacuumHistory() {
+    const events = await api('GET', '/process-events?event_type=VACUUM');
+    document.getElementById('vacuumTable').innerHTML = events.length ? events.slice(0, 30).map(ev => {
+        const link = ev.links.find(l => l.role === 'OUTPUT') || ev.links.find(l => l.role === 'INPUT');
+        const notes = ev.notes ? safeParse(ev.notes) : {};
+        return `<tr>
+            <td>${ev.event_date}</td>
+            <td class="batch-id">${link ? '#' + link.batch_id : '–'}</td>
+            <td>${link ? fmtQty(link.quantity) : '–'}</td>
+            <td>${notes.product_description || '–'}</td>
+            <td>${notes.buyer || '–'}</td>
+            <td>${picName(ev.pic_user_id)}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">Belum ada data Vacuum</td></tr>';
+}
+
+// ─── PACKING (ONE-or-MANY->ONE, own form -- dynamic source-batch list,
+// same reasoning as Mixing but min 1 source not 2, see
+// services/vacuum_packing.py "Packing" section) ────────────────────────
+let pkSourceSeq = 0;
+
+function pkSourceRowHtml(rowId) {
+    return `<div class="form-row pk-source-row" data-row-id="${rowId}" style="align-items:end">
+        <div class="form-group">
+            <label class="form-label">Batch Sumber</label>
+            <select class="form-select pk-src-batch" id="pkSrcBatch${rowId}"><option value="">Pilih batch...</option></select>
+        </div>
+        <div class="form-group" style="display:flex;gap:8px;align-items:end">
+            <div style="flex:1">
+                <label class="form-label">Berat (kg)</label>
+                <input type="number" class="form-input pk-src-qty" id="pkSrcQty${rowId}" step="0.001" min="0">
+            </div>
+            <button type="button" class="btn btn-secondary btn-small pk-src-remove">✕</button>
+        </div>
+    </div>`;
+}
+
+function addPkSourceRow() {
+    pkSourceSeq += 1;
+    const host = document.getElementById('pkSources');
+    host.insertAdjacentHTML('beforeend', pkSourceRowHtml(pkSourceSeq));
+    const row = host.lastElementChild;
+    row.querySelector('.pk-src-batch').innerHTML = '<option value="">Pilih batch...</option>' + activeBatchOptionsHtml();
+    row.querySelector('.pk-src-remove').addEventListener('click', () => {
+        if (host.children.length <= 1) { toast('Packing butuh minimal 1 batch sumber.', 'error'); return; }
+        row.remove();
+    });
+}
+
+function initPkSources() {
+    const host = document.getElementById('pkSources');
+    host.innerHTML = '';
+    pkSourceSeq = 0;
+    addPkSourceRow();
+}
+
+function refreshPackingSourceOptions() {
+    const host = document.getElementById('pkSources');
+    if (!host) return;
+    const opts = activeBatchOptionsHtml();
+    host.querySelectorAll('.pk-src-batch').forEach(sel => {
+        const current = sel.value;
+        sel.innerHTML = '<option value="">Pilih batch...</option>' + opts;
+        if (current) sel.value = current;
+    });
+}
+
+document.getElementById('pkAddSource').addEventListener('click', addPkSourceRow);
+document.getElementById('packingForm').addEventListener('reset', () => setTimeout(initPkSources, 0));
+document.getElementById('pkTanggal').value = todayStr();
+
+document.getElementById('packingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const picId = document.getElementById('pkPic').value;
+    if (!picId) { toast('PIC harus dipilih.', 'error'); return; }
+
+    const sources = [];
+    document.querySelectorAll('#pkSources .pk-source-row').forEach(row => {
+        const batchId = row.querySelector('.pk-src-batch').value;
+        const qty = row.querySelector('.pk-src-qty').value;
+        if (batchId && qty) sources.push({ batch_id: Number(batchId), quantity: qty });
+    });
+    if (!sources.length) { toast('Isi minimal 1 batch sumber beserta beratnya.', 'error'); return; }
+    const batchIds = sources.map(s => s.batch_id);
+    if (new Set(batchIds).size !== batchIds.length) { toast('Batch sumber tidak boleh duplikat.', 'error'); return; }
+
+    const bruto = document.getElementById('pkBruto').value;
+    if (!bruto || Number(bruto) <= 0) { toast('Bruto harus lebih dari 0.', 'error'); return; }
+
+    const payload = {
+        event_date: document.getElementById('pkTanggal').value,
+        pic_user_id: Number(picId),
+        sources,
+        gross_weight: bruto,
+        plastic_size: document.getElementById('pkPlastikUkuran').value.trim() || null,
+        plastic_lot: document.getElementById('pkPlastikLot').value.trim() || null,
+        plastic_qty: document.getElementById('pkPlastikQty').value || null,
+        carton_lot: document.getElementById('pkKartonLot').value.trim() || null,
+        carton_qty: document.getElementById('pkKartonQty').value || null,
+        envelope_qty: document.getElementById('pkAmplop').value || null,
+        shipping_number: document.getElementById('pkNomorKirim').value.trim() || null,
+        destination: document.getElementById('pkTujuan').value.trim() || null,
+        product_description: document.getElementById('pkDesc').value.trim() || null,
+        buyer: document.getElementById('pkBuyer').value.trim() || null,
+    };
+    const batchType = document.getElementById('pkBatchType').value;
+    if (batchType) payload.batch_type = batchType;
+    const grade = document.getElementById('pkGrade').value.trim();
+    if (grade) payload.grade_code = grade;
+    const jenis = document.getElementById('pkJenis').value.trim();
+    if (jenis) payload.jenis_code = jenis;
+    const supplierId = document.getElementById('pkSupplier').value;
+    if (supplierId) payload.supplier_id = Number(supplierId);
+
+    try {
+        const result = await api('POST', '/packing', payload);
+        toast(`✅ Packing tersimpan — batch baru #${result.batch.batch_id} (netto ${fmtQty(result.batch.net_weight)} kg)`, 'success', 5000);
+        document.getElementById('packingForm').reset();
+        document.getElementById('pkTanggal').value = todayStr();
+        initPkSources();
+        await refreshBatches();
+        await renderPackingHistory();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+async function renderPackingHistory() {
+    const events = await api('GET', '/process-events?event_type=PACKING');
+    document.getElementById('packingTable').innerHTML = events.length ? events.slice(0, 30).map(ev => {
+        const sourcesTxt = ev.links.filter(l => l.role === 'INPUT').map(l => `#${l.batch_id} (${fmtQty(l.quantity)})`).join(', ');
+        const outputLink = ev.links.find(l => l.role === 'OUTPUT');
+        const outBatch = outputLink ? batches.find(b => b.batch_id === outputLink.batch_id) : null;
+        const notes = ev.notes ? safeParse(ev.notes) : {};
+        return `<tr>
+            <td>${ev.event_date}</td>
+            <td>${sourcesTxt || '–'}</td>
+            <td class="batch-id">${outputLink ? '#' + outputLink.batch_id : '–'}</td>
+            <td>${outBatch && outBatch.gross_weight != null ? fmtQty(outBatch.gross_weight) : '–'}</td>
+            <td>${outBatch && outBatch.net_weight != null ? fmtQty(outBatch.net_weight) : (outputLink ? fmtQty(outputLink.quantity) : '–')}</td>
+            <td>${outBatch && outBatch.tare_weight != null ? fmtQty(outBatch.tare_weight) : '–'}</td>
+            <td>${notes.product_description || '–'}</td>
+            <td>${picName(ev.pic_user_id)}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada data Packing</td></tr>';
+}
+
 // ─── BATCH LIST ─────────────────────────────────────────────────────────
 async function renderBatchList() {
     const status = document.getElementById('blStatus').value;
@@ -646,6 +904,8 @@ async function boot() {
     try {
         renderStageSelect();
         initMixSources();
+        initVacLines();
+        initPkSources();
         await loadMasterData();
         await refreshBatches();
         await renderDashboard();

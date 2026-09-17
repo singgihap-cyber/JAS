@@ -568,3 +568,282 @@ def test_list_batches_filters_by_status_and_type(client, supplier_id, pic_id):
     assert all(b["batch_type"] == "RAW_KERING" for b in active_kering)
     assert all(b["batch_type"] == "RAW_HIJAU" for b in active_hijau)
     assert len(active_hijau) == 1
+
+
+# ------------------------------------------------------------------- rework
+# Fase 15 slice 3
+
+
+def test_rework_splits_into_multiple_output_batches(client, supplier_id, pic_id):
+    """services/rework.py: ONE->MANY like Sortation (Gourmet/EG/EP/NC, no
+    Powder slot), but every output is unconditionally tagged
+    process_code='04' (#5) -- not a caller parameter, unlike Sortation's
+    exposed process_code."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "50.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/rework",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "gourmet_qty": "20.000",
+            "eg_qty": "15.000",
+            "nc_qty": "10.000",
+            "process_description": "Olah ulang sisa sortasi",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event"]["event_type"] == "REWORK"
+    assert body["event"]["shrinkage_qty"] == "5.000"  # 50 - (20+15+10)
+    batches = {b["grade_code"]: b for b in body["batches"]}
+    assert set(batches) == {"01", "02", "04"}
+    for b in batches.values():
+        assert b["process_code"] == "04"  # hardcoded, rework.py #5
+        assert b["batch_type"] == "PROCESSED"
+
+    source = client.get(f"/api/batches/{batch_id}").json()
+    assert source["current_quantity"] == "0.000"
+    assert source["status"] == "CONSUMED"
+
+
+def test_rework_with_no_grade_quantity_is_422(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/rework",
+        json={"event_date": "2026-09-17", "pic_user_id": pic_id, "batch_id": batch_id},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_input"
+
+
+# ------------------------------------------------------------- vacuum/packing
+# Fase 15 slice 3
+
+
+def test_vacuum_is_self_loop_and_sums_plastic_lines(client, supplier_id, pic_id):
+    """services/vacuum_packing.py #1/#2: no new batch minted, event quantity
+    is SUM(plastic_lines.total_weight), stock-neutral (INPUT==OUTPUT==same
+    batch, same quantity)."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "20.030",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/vacuum",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "plastic_lines": [
+                {"total_weight": "20.000", "plastic_size": "25x37.5"},
+                {"total_weight": "0.030", "plastic_size": "15x25"},
+            ],
+            "product_description": "GOURMET",
+            "buyer": "MCC",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event_type"] == "VACUUM"
+    assert body["shrinkage_qty"] == "0"
+    assert {link["role"] for link in body["links"]} == {"INPUT", "OUTPUT"}
+    for link in body["links"]:
+        assert link["batch_id"] == batch_id
+        assert link["quantity"] == "20.030"
+
+    unchanged = client.get(f"/api/batches/{batch_id}").json()
+    assert unchanged["current_quantity"] == "20.030"  # stock-neutral self-loop
+    assert unchanged["status"] == "ACTIVE"
+
+
+def test_vacuum_requires_at_least_one_plastic_line_is_422(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/vacuum",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "plastic_lines": [],
+        },
+    )
+    assert r.status_code == 422  # pydantic min_length=1 on plastic_lines
+
+
+def test_packing_single_source_derives_net_and_tare_weight(client, supplier_id, pic_id):
+    """services/vacuum_packing.py #6/#7: net_weight=SUM(sources),
+    tare_weight=gross_weight-net_weight, both derived server-side. Single
+    source -> grade/jenis/supplier/receiving_date inherited (#12)."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "1000.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/packing",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": batch_id, "quantity": "1000.000"}],
+            "gross_weight": "1057.200",
+            "plastic_size": "25x37.5",
+            "carton_lot": "K-001",
+            "carton_qty": "10",
+            "shipping_number": "SHP-001",
+            "destination": "Vietnam",
+            "product_description": "GOURMET",
+            "buyer": "MCC",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event"]["event_type"] == "PACKING"
+    assert body["event"]["shrinkage_qty"] == "0"  # Packing never loses weight, #6
+    packed = body["batch"]
+    assert packed["batch_type"] == "PACKAGED"
+    assert packed["current_quantity"] == "1000.000"
+    assert packed["net_weight"] == "1000.000"
+    assert packed["gross_weight"] == "1057.200"
+    assert packed["tare_weight"] == "57.200"
+    assert packed["carton_lot"] == "K-001"
+    assert packed["supplier_id"] == supplier_id  # inherited from single source, #12
+    assert packed["receiving_date"] == "2026-09-17"  # inherited (== source's event_date, receiving.py)
+
+    source = client.get(f"/api/batches/{batch_id}").json()
+    assert source["current_quantity"] == "0.000"
+    assert source["status"] == "CONSUMED"
+
+
+def test_packing_multiple_sources_combine_without_auto_inheritance(client, supplier_id, pic_id):
+    """services/vacuum_packing.py #12: with >1 source, grade/jenis/supplier
+    are left None unless the caller states them explicitly -- no guessed
+    "winner" between sources."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    src_batch = r.json()["batch"]["batch_id"]
+    sort = client.post(
+        "/api/sortation",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "batch_id": src_batch,
+            "gourmet_qty": "40.000",
+            "eg_qty": "30.000",
+        },
+    )
+    batches = {b["grade_code"]: b["batch_id"] for b in sort.json()["batches"]}
+
+    r = client.post(
+        "/api/packing",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "sources": [
+                {"batch_id": batches["01"], "quantity": "40.000"},
+                {"batch_id": batches["02"], "quantity": "30.000"},
+            ],
+            "gross_weight": "72.000",
+        },
+    )
+    assert r.status_code == 201, r.text
+    packed = r.json()["batch"]
+    assert packed["net_weight"] == "70.000"
+    assert packed["tare_weight"] == "2.000"
+    assert packed["grade_code"] is None
+    assert packed["supplier_id"] is None
+
+
+def test_packing_requires_at_least_one_source_is_422(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/packing",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "sources": [],
+            "gross_weight": "10.000",
+        },
+    )
+    assert r.status_code == 422  # pydantic min_length=1 on sources
+
+
+def test_packing_rejects_duplicate_source_batch_id(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/packing",
+        json={
+            "event_date": "2026-09-17",
+            "pic_user_id": pic_id,
+            "sources": [
+                {"batch_id": batch_id, "quantity": "5.000"},
+                {"batch_id": batch_id, "quantity": "5.000"},
+            ],
+            "gross_weight": "10.000",
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_input"

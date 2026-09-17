@@ -8,12 +8,13 @@
 </head>
 <body>
 <div class="sidebar">
-    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 2</small></div>
+    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 3</small></div>
     <div class="nav">
         <button class="nav-item active" data-page="dashboard">📊 Dashboard</button>
         <button class="nav-item" data-page="batch-input">📥 Penerimaan Barang</button>
         <button class="nav-item" data-page="proses">⚙️ Input Proses</button>
         <button class="nav-item" data-page="mixing">🥣 Mixing</button>
+        <button class="nav-item" data-page="vacuum-packing">🧴 Vacuum &amp; Packing</button>
         <button class="nav-item" data-page="batch-list">📋 Daftar Batch</button>
         <button class="nav-item" data-page="batch-history">🔍 Batch History</button>
         <button class="nav-item" data-page="suppliers">🏭 Data Supplier</button>
@@ -33,11 +34,11 @@
             <div class="section">
                 <div class="section-title">📈 Ringkasan Batch Aktif</div>
                 <div class="info-box">
-                    Slice 1+2 Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming, Sundrying,
-                    Sortasi, Mixing, Grinding &amp; Sieving, Magnetization, Metal Detection Powder</strong> sudah
-                    tersambung penuh ke engine. Tahap lain (Rework, Vacuum/Packing, Delivery, Stock,
-                    Traceability, Adjustment) menyusul di sesi berikutnya — struktur router/halaman ini memang
-                    dirancang supaya tahap baru cukup ditambahkan, bukan dibangun ulang.
+                    Slice 1+2+3 Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming, Sundrying,
+                    Sortasi, Mixing, Grinding &amp; Sieving, Magnetization, Metal Detection Powder, Rework,
+                    Vacuum, Packing</strong> sudah tersambung penuh ke engine (9 dari 12 modul). Tahap lain
+                    (Delivery, Stock, Traceability, Adjustment) menyusul di sesi berikutnya — struktur
+                    router/halaman ini memang dirancang supaya tahap baru cukup ditambahkan, bukan dibangun ulang.
                 </div>
                 <div class="table-container">
                     <table>
@@ -277,6 +278,200 @@
                     <table>
                         <thead><tr><th>Tanggal</th><th>Sumber</th><th>Batch Gabungan</th><th>CP Qty</th><th>Qty Akhir</th><th>Susut</th><th>Deskripsi</th><th>PIC</th></tr></thead>
                         <tbody id="mixingTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- VACUUM & PACKING -->
+        <div class="page" id="vacuum-packing">
+            <div class="section">
+                <div class="section-title">🧴 Vacuum (VC)</div>
+                <div class="info-box">
+                    Vacuum adalah proses <strong>self-loop</strong> — tidak membuat batch baru
+                    (services/vacuum_packing.py #1). Kuantitas event dihitung otomatis dari total seluruh baris
+                    plastik (<code>SUM(BERAT TOTAL)</code>), bukan diinput manual.
+                </div>
+                <form id="vacuumForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Tanggal <span style="color:var(--danger)">*</span></label>
+                            <input type="date" class="form-input" id="vTanggal" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">PIC <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="vPic" required></select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Batch <span style="color:var(--danger)">*</span></label>
+                        <select class="form-select" id="vBatch" required></select>
+                    </div>
+
+                    <div class="form-divider">📦 Baris Plastik (minimal 1)</div>
+                    <div id="vacLines"></div>
+                    <button type="button" class="btn btn-secondary btn-small" id="vacAddLine" style="margin-bottom:12px">+ Tambah Baris Plastik</button>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Deskripsi Produk</label>
+                            <input class="form-input" id="vDesc" placeholder="mis. GOURMET">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Buyer</label>
+                            <input class="form-input" id="vBuyer">
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Simpan Vacuum</button>
+                        <button type="reset" class="btn btn-secondary" id="vacResetBtn">Reset</button>
+                    </div>
+                </form>
+            </div>
+            <div class="section">
+                <div class="section-title">📊 Riwayat Vacuum</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Tanggal</th><th>Batch</th><th>Total Berat</th><th>Deskripsi</th><th>Buyer</th><th>PIC</th></tr></thead>
+                        <tbody id="vacuumTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">📦 Packing (PACK)</div>
+                <div class="info-box">
+                    Menggabungkan <strong>satu atau lebih</strong> batch sumber menjadi satu batch
+                    <code>PACKAGED</code> baru. <code>NETTO</code> = jumlah berat sumber, <code>TARA</code> =
+                    Bruto − Netto — keduanya dihitung otomatis oleh engine (services/vacuum_packing.py #6/#7),
+                    tidak dihitung ulang di form ini.
+                </div>
+                <form id="packingForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Tanggal <span style="color:var(--danger)">*</span></label>
+                            <input type="date" class="form-input" id="pkTanggal" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">PIC <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="pkPic" required></select>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">🔗 Batch Sumber (minimal 1)</div>
+                    <div id="pkSources"></div>
+                    <button type="button" class="btn btn-secondary btn-small" id="pkAddSource" style="margin-bottom:12px">+ Tambah Sumber Batch</button>
+
+                    <div class="form-divider">⚖️ Berat</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Bruto (kg) <span style="color:var(--danger)">*</span></label>
+                            <input type="number" class="form-input" id="pkBruto" step="0.001" min="0" required>
+                            <div class="form-hint">Netto &amp; Tara dihitung otomatis dari total batch sumber dan Bruto.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">📦 Plastik &amp; Karton</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Ukuran Plastik Vacuum</label>
+                            <input class="form-input" id="pkPlastikUkuran">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Lot No. Plastik Vacuum</label>
+                            <input class="form-input" id="pkPlastikLot">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Qty Plastik Vacuum</label>
+                            <input type="number" class="form-input" id="pkPlastikQty" step="0.001" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Lot No. Karton</label>
+                            <input class="form-input" id="pkKartonLot">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Qty Karton (Coly)</label>
+                            <input type="number" class="form-input" id="pkKartonQty" step="1" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Amplop</label>
+                            <input type="number" class="form-input" id="pkAmplop" step="1" min="0">
+                        </div>
+                    </div>
+
+                    <div class="form-divider">🚚 Pengiriman &amp; Lainnya (opsional)</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Nomor Pengiriman</label>
+                            <input class="form-input" id="pkNomorKirim">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Tujuan Pengiriman</label>
+                            <input class="form-input" id="pkTujuan">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Deskripsi Produk</label>
+                            <input class="form-input" id="pkDesc" placeholder="mis. GOURMET">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Pembeli (Buyer)</label>
+                            <input class="form-input" id="pkBuyer">
+                        </div>
+                    </div>
+
+                    <div class="form-divider">⚙️ Opsional Lanjutan (kosongkan untuk default engine)</div>
+                    <div class="info-box">
+                        Grade/Jenis/Supplier hanya diwariskan otomatis dari batch sumber kalau sumbernya satu
+                        batch (services/vacuum_packing.py #12) — isi manual kalau sumbernya lebih dari satu dan
+                        perlu ditentukan.
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Alur Hasil (Batch Type)</label>
+                            <select class="form-select" id="pkBatchType">
+                                <option value="">PACKAGED (default)</option>
+                                <option value="RAW_KERING">RAW_KERING</option>
+                                <option value="RAW_HIJAU">RAW_HIJAU</option>
+                                <option value="PROCESSED">PROCESSED</option>
+                                <option value="POWDER">POWDER</option>
+                                <option value="PACKAGED">PACKAGED</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Grade Code</label>
+                            <input class="form-input" id="pkGrade" placeholder="opsional">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Jenis Code</label>
+                            <input class="form-input" id="pkJenis" placeholder="opsional">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Supplier (jika satu supplier)</label>
+                            <select class="form-select" id="pkSupplier"><option value="">Tidak diisi (warisi dari sumber jika 1)</option></select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Simpan Packing</button>
+                        <button type="reset" class="btn btn-secondary" id="pkResetBtn">Reset</button>
+                    </div>
+                </form>
+            </div>
+            <div class="section">
+                <div class="section-title">📊 Riwayat Packing</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Tanggal</th><th>Sumber</th><th>Batch Baru</th><th>Bruto</th><th>Netto</th><th>Tara</th><th>Deskripsi</th><th>PIC</th></tr></thead>
+                        <tbody id="packingTable"></tbody>
                     </table>
                 </div>
             </div>

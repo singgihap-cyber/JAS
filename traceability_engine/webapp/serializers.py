@@ -34,6 +34,13 @@ def batch_to_out(batch: Batch) -> BatchOut:
         current_quantity=batch.current_quantity,
         unit=batch.unit,
         created_at=batch.created_at,
+        plastic_size=batch.plastic_size,
+        plastic_lot=batch.plastic_lot,
+        plastic_qty=batch.plastic_qty,
+        carton_lot=batch.carton_lot,
+        gross_weight=batch.gross_weight,
+        tare_weight=batch.tare_weight,
+        net_weight=batch.net_weight,
     )
 
 
