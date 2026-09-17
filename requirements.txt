@@ -1,3 +1,8 @@
 sqlalchemy>=2.0,<3.0
 psycopg2-binary>=2.9  # PostgreSQL driver for production; SQLite (stdlib) is used for tests
 pytest>=8.0
+
+# Fase 15 -- web/API layer (traceability_engine/webapp)
+fastapi>=0.110,<1.0
+uvicorn>=0.29
+httpx>=0.27  # required by fastapi.testclient.TestClient (Starlette), used in tests/test_webapp_api.py

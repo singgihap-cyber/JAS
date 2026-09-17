@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PT JAS Traceability</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="sidebar">
+    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 1</small></div>
+    <div class="nav">
+        <button class="nav-item active" data-page="dashboard">📊 Dashboard</button>
+        <button class="nav-item" data-page="batch-input">📥 Penerimaan Barang</button>
+        <button class="nav-item" data-page="proses">⚙️ Input Proses</button>
+        <button class="nav-item" data-page="batch-list">📋 Daftar Batch</button>
+        <button class="nav-item" data-page="batch-history">🔍 Batch History</button>
+        <button class="nav-item" data-page="suppliers">🏭 Data Supplier</button>
+        <button class="nav-item" data-page="users">👥 User Management</button>
+    </div>
+</div>
+
+<div class="main">
+    <div class="header">
+        <h1 id="pageTitle">Dashboard</h1>
+        <div class="api-status err" id="apiStatus">Menghubungkan...</div>
+    </div>
+    <div class="content">
+
+        <!-- DASHBOARD -->
+        <div class="page active" id="dashboard">
+            <div class="section">
+                <div class="section-title">📈 Ringkasan Batch Aktif</div>
+                <div class="info-box">
+                    Slice pertama Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming,
+                    Sundrying</strong> sudah tersambung penuh ke engine. Tahap lain (Sortasi, Mixing, Powder,
+                    Rework, Vacuum/Packing, Delivery, Stock, Traceability) menyusul di sesi berikutnya —
+                    struktur router/halaman ini memang dirancang supaya tahap baru cukup ditambahkan, bukan
+                    dibangun ulang.
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Batch ID</th><th>Batch Number</th><th>Jenis Alur</th><th>Supplier</th><th>Qty Saat Ini</th><th>Status</th></tr></thead>
+                        <tbody id="dashboardTable"><tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">Memuat...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- PENERIMAAN BARANG -->
+        <div class="page" id="batch-input">
+            <div class="section">
+                <div class="section-title">📥 Penerimaan Barang (Receiving)</div>
+                <div class="warn-box">
+                    <strong>Nomor batch TIDAK dibuat otomatis.</strong> Segmen "Jenis" (AA) pada format nomor
+                    batch masih [BELUM DIKONFIRMASI] ke PT JAS, jadi generator sengaja belum diimplementasi
+                    (lihat BATCH_NUMBER_SPEC.md). Isi nomor batch manual kalau sudah ada dari catatan lain, atau
+                    kosongkan — batch tetap tersimpan tanpa nomor.
+                </div>
+                <form id="receivingForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Nomor Batch (opsional, manual)</label>
+                            <input class="form-input" id="rNomorBatch" placeholder="mis. 030224-260221-00">
+                            <div class="form-hint" id="rNomorBatchPreview">&nbsp;</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Alur / Batch Type <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="rBatchType" required>
+                                <option value="RAW_KERING">RAW_KERING (Kering)</option>
+                                <option value="RAW_HIJAU">RAW_HIJAU (Hijau)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Supplier <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="rSupplier" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Tanggal Kedatangan <span style="color:var(--danger)">*</span></label>
+                            <input type="date" class="form-input" id="rTanggal" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">PIC Penerimaan <span style="color:var(--danger)">*</span></label>
+                        <select class="form-select" id="rPic" required></select>
+                    </div>
+
+                    <div class="form-divider">⚖️ Data Berat</div>
+                    <div class="form-row-3">
+                        <div class="form-group">
+                            <label class="form-label">Bruto (kg)</label>
+                            <input type="number" class="form-input" id="rBruto" step="0.001" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Tara (kg)</label>
+                            <input type="number" class="form-input" id="rTara" step="0.001" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Netto (kg) <span style="color:var(--danger)">*</span></label>
+                            <input type="number" class="form-input" id="rNetto" step="0.001" min="0" required>
+                            <div class="form-hint">Ini yang jadi kuantitas batch — diisi otomatis dari Bruto−Tara, bisa diedit manual.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">🔍 On-Spec / Off-Spec (dicatat, tidak memisah batch)</div>
+                    <div class="info-box">
+                        Sesuai keputusan engine (services/receiving.py): seluruh netto tetap jadi <strong>satu
+                        batch</strong>. On-spec/off-spec di sini hanya dicatat sebagai catatan, belum otomatis
+                        membuat batch terpisah atau menandai batch ditolak.
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">On-Spec (kg)</label>
+                            <input type="number" class="form-input" id="rOnSpec" step="0.001" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Off-Spec (kg)</label>
+                            <input type="number" class="form-input" id="rOffSpec" step="0.001" min="0">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Uji Bau (Smell Test)</label>
+                            <input class="form-input" id="rSmell" placeholder="mis. Normal">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Deskripsi Produk</label>
+                            <input class="form-input" id="rDesc" placeholder="mis. GOURMET">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Kondisi Kemasan</label>
+                            <input class="form-input" id="rKemasan">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Coly</label>
+                            <input type="number" class="form-input" id="rColy" step="1" min="0">
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Buat Batch</button>
+                        <button type="reset" class="btn btn-secondary">Reset</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- INPUT PROSES (schema-driven) -->
+        <div class="page" id="proses">
+            <div class="section">
+                <div class="section-title">⚙️ Input Proses</div>
+                <div class="info-box">
+                    Satu halaman untuk semua tahap proses yang sudah tersambung. Field angka hasil turunan
+                    (rata-rata KA, penyusutan) hanya ditampilkan dari <strong>hasil respons API</strong> setelah
+                    disimpan — tidak dihitung ulang di sisi form supaya aturan bisnis tetap satu-satunya di
+                    engine Python.
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Tahap Proses <span style="color:var(--danger)">*</span></label>
+                        <select class="form-select" id="pTahap"></select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Batch <span style="color:var(--danger)">*</span></label>
+                        <select class="form-select" id="pBatch"></select>
+                    </div>
+                </div>
+                <form id="prosesForm">
+                    <div id="prosesFields"></div>
+                    <div class="form-group">
+                        <label class="form-label">PIC <span style="color:var(--danger)">*</span></label>
+                        <select class="form-select" id="pPic" required></select>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Simpan</button>
+                        <button type="reset" class="btn btn-secondary">Reset</button>
+                    </div>
+                </form>
+            </div>
+            <div class="section">
+                <div class="section-title" id="prosesRiwayatTitle">📊 Riwayat</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr id="prosesTableHead"></tr></thead>
+                        <tbody id="prosesTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- BATCH LIST -->
+        <div class="page" id="batch-list">
+            <div class="section">
+                <div class="section-title">📋 Daftar Semua Batch</div>
+                <div class="form-row" style="margin-bottom:12px">
+                    <div class="form-group">
+                        <label class="form-label">Filter Status</label>
+                        <select class="form-select" id="blStatus">
+                            <option value="">Semua</option>
+                            <option value="ACTIVE">ACTIVE</option>
+                            <option value="CONSUMED">CONSUMED</option>
+                            <option value="REJECTED">REJECTED</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Filter Alur</label>
+                        <select class="form-select" id="blType">
+                            <option value="">Semua</option>
+                            <option value="RAW_KERING">RAW_KERING</option>
+                            <option value="RAW_HIJAU">RAW_HIJAU</option>
+                            <option value="PROCESSED">PROCESSED</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Batch ID</th><th>Batch Number</th><th>Alur</th><th>Supplier</th><th>Qty</th><th>Status</th><th>Dibuat</th></tr></thead>
+                        <tbody id="batchListTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- BATCH HISTORY -->
+        <div class="page" id="batch-history">
+            <div class="section">
+                <div class="section-title">🔍 Batch History / Traceability</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Batch ID</label>
+                        <input type="number" class="form-input" id="historySearch" placeholder="Masukkan Batch ID...">
+                    </div>
+                    <div class="form-group" style="align-self:end">
+                        <button class="btn btn-primary" onclick="findBatch()">Cari</button>
+                    </div>
+                </div>
+                <div id="historyDetails" style="margin-top:10px">
+                    <p style="color:var(--text-secondary)">Masukkan Batch ID untuk melihat riwayat lengkapnya.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SUPPLIERS -->
+        <div class="page" id="suppliers">
+            <div class="section">
+                <div class="section-title">🏭 Data Supplier</div>
+                <form id="supplierForm" style="display:flex;gap:8px;margin-bottom:14px;align-items:end">
+                    <div class="form-group" style="flex:1;margin-bottom:0">
+                        <label class="form-label">Kode Supplier</label>
+                        <input class="form-input" id="newSupplierCode" placeholder="mis. 024" required>
+                    </div>
+                    <div class="form-group" style="flex:2;margin-bottom:0">
+                        <label class="form-label">Nama Supplier</label>
+                        <input class="form-input" id="newSupplierName" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">+ Tambah</button>
+                </form>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Kode</th><th>Nama</th><th>Aktif</th></tr></thead>
+                        <tbody id="suppliersTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- USERS -->
+        <div class="page" id="users">
+            <div class="section">
+                <div class="section-title">👥 User Management</div>
+                <form id="userForm" style="display:flex;gap:8px;margin-bottom:14px;align-items:end">
+                    <div class="form-group" style="flex:2;margin-bottom:0">
+                        <label class="form-label">Nama</label>
+                        <input class="form-input" id="newUserName" required>
+                    </div>
+                    <div class="form-group" style="flex:1;margin-bottom:0">
+                        <label class="form-label">Role</label>
+                        <select class="form-select" id="newUserRole">
+                            <option value="STAFF">STAFF</option>
+                            <option value="PRODUCTION_MANAGER">PRODUCTION_MANAGER</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">+ Tambah</button>
+                </form>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Nama</th><th>Role</th></tr></thead>
+                        <tbody id="usersTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+<div id="toastContainer"></div>
+<script src="/app.js"></script>
+</body>
+</html>
