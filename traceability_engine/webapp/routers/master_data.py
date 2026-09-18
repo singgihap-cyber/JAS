@@ -6,23 +6,36 @@ already fixed.
 
 Customer is added here in Fase 15 slice 5 (Delivery) -- `Customer` has
 existed as an empty master-data table since Fase 3, but nothing wrote to
-it until now. Per services/delivery.py #7, this engine layer performs NO
-free-text-to-Customer matching/fuzzy-lookup -- that remains [UNCONFIRMED]
-(Fase 12 poin 7). This CRUD-lite endpoint only lets a user optionally
-create/pick a real Customer row up front; `Shipment.recipient` (free text)
-is always recorded regardless, so leaving `customer_id` unset is a fully
-supported path, not a degraded one.
+it until now. Per services/delivery.py #7, this router itself performs no
+matching logic -- that free-text-to-Customer matching/fuzzy-lookup gap
+(Fase 12 poin 7) is now resolved by `services/customer_matching.py` (Fase
+21) and exposed below as `GET /customers/match`, a thin wrapper following
+the same thin-router convention as every other stage. This CRUD-lite
+endpoint still lets a user optionally create/pick a real Customer row up
+front; `Shipment.recipient` (free text) is always recorded regardless, so
+leaving `customer_id` unset remains a fully supported path, not a degraded
+one -- matching only assists that choice, per customer_matching.py #1 it
+never makes it automatically.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...enums import UserRole
 from ...models import Customer, Supplier, User
+from ...services.customer_matching import match_customer
 from ..database import get_db
-from ..schemas import CustomerCreate, CustomerOut, SupplierCreate, SupplierOut, UserCreate, UserOut
+from ..schemas import (
+    CustomerCreate,
+    CustomerMatchOut,
+    CustomerOut,
+    SupplierCreate,
+    SupplierOut,
+    UserCreate,
+    UserOut,
+)
 
 router = APIRouter(tags=["master-data"])
 
@@ -64,3 +77,23 @@ def create_customer(payload: CustomerCreate, db: Session = Depends(get_db)):
     db.add(customer)
     db.flush()
     return customer
+
+
+@router.get("/customers/match", response_model=list[CustomerMatchOut])
+def match_customers(
+    q: str = Query(..., min_length=1, description="Free-text recipient name to match, e.g. the Delivery/Sample Delivery 'Perusahaan Penerima' field"),
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    """Fase 21 -- ranked `Customer` suggestions for a free-text name, thin
+    wrapper over `services/customer_matching.match_customer()`. Suggestion
+    only (customer_matching.py #1) -- the caller (UI) still decides whether
+    to attribute `customer_id`, create a new `Customer`, or leave it unset.
+    A static path, registered after `/customers` (list/create) but with no
+    ordering hazard: there is no `/customers/{customer_id}` dynamic route in
+    this router to shadow.
+    """
+    return [
+        CustomerMatchOut(customer_id=m.customer_id, name=m.name, score=m.score, exact=m.exact)
+        for m in match_customer(db, q, limit=limit)
+    ]

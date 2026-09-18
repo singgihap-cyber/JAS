@@ -57,6 +57,17 @@ class CustomerOut(BaseModel):
     name: str
 
 
+class CustomerMatchOut(BaseModel):
+    """Fase 21 -- one ranked suggestion from `services/customer_matching.py`.
+    Suggestion-only; the caller decides whether/what to do with it (module
+    docstring #1) -- this schema carries no side effect."""
+
+    customer_id: int
+    name: str
+    score: float
+    exact: bool
+
+
 # --------------------------------------------------------------------- batch
 class BatchOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

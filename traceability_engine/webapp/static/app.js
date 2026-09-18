@@ -128,6 +128,75 @@ document.getElementById('customerForm').addEventListener('submit', async (e) => 
     } catch (err) { toast('❌ ' + err.message, 'error'); }
 });
 
+// ─── CUSTOMER MATCHING (Fase 21, resolves Fase 12 poin 7) ─────────────────
+// Suggestion-only UI assist over GET /customers/match
+// (services/customer_matching.py). It NEVER writes customer_id itself --
+// clicking a suggestion chip just sets the existing
+// <select id="{prefix}Customer"> to that customer_id, exactly as if the
+// operator had picked it manually from the dropdown (customer_matching.py
+// module docstring #1: matching assists, never decides). A failed match
+// call is swallowed (best-effort UI assist) rather than blocking the form.
+let _customerMatchTimers = {};
+
+function setupCustomerMatch(prefix) {
+    const nameInput = document.getElementById(`${prefix}Perusahaan`);
+    const suggestBox = document.getElementById(`${prefix}CustomerSuggest`);
+    if (!nameInput || !suggestBox) return;
+
+    nameInput.addEventListener('input', () => {
+        clearTimeout(_customerMatchTimers[prefix]);
+        const q = nameInput.value.trim();
+        if (!q) { suggestBox.innerHTML = ''; return; }
+        _customerMatchTimers[prefix] = setTimeout(async () => {
+            let candidates = [];
+            try { candidates = await api('GET', `/customers/match?q=${encodeURIComponent(q)}&limit=5`); }
+            catch (e) { return; }
+            renderCustomerSuggestions(prefix, q, candidates);
+        }, 350);
+    });
+}
+
+function renderCustomerSuggestions(prefix, query, candidates) {
+    const suggestBox = document.getElementById(`${prefix}CustomerSuggest`);
+    if (!suggestBox) return;
+    const chips = candidates.map(c => {
+        const pct = Math.round(c.score * 100);
+        const label = c.exact ? `✓ ${c.name}` : `${c.name} (~${pct}%)`;
+        return `<button type="button" class="badge ${c.exact ? 'badge-success' : 'badge-primary'} suggest-chip" data-prefix="${prefix}" data-customer-id="${c.customer_id}">${label}</button>`;
+    }).join('');
+    const noneHint = chips ? '' : '<span class="form-hint" style="margin:0">Tidak ada customer serupa.</span>';
+    const createChip = `<button type="button" class="badge badge-gray suggest-chip" data-prefix="${prefix}" data-create="${encodeURIComponent(query)}">+ Buat customer baru "${query}"</button>`;
+    suggestBox.innerHTML = chips + noneHint + createChip;
+}
+
+document.body.addEventListener('click', async (e) => {
+    const chip = e.target.closest('.suggest-chip');
+    if (!chip) return;
+    const prefix = chip.dataset.prefix;
+    const select = document.getElementById(`${prefix}Customer`);
+    const suggestBox = document.getElementById(`${prefix}CustomerSuggest`);
+    if (!select) return;
+
+    if (chip.dataset.customerId) {
+        select.value = chip.dataset.customerId;
+        toast('Customer dipilih dari saran — masih bisa diganti manual di dropdown.', 'info', 3000);
+    } else if (chip.dataset.create !== undefined) {
+        const name = decodeURIComponent(chip.dataset.create);
+        try {
+            const created = await api('POST', '/customers', { name });
+            customers = await api('GET', '/customers');
+            renderCustomerSelects();
+            renderCustomersTable();
+            select.value = created.customer_id;
+            toast(`✅ Customer "${name}" dibuat & dipilih.`, 'success');
+        } catch (err) { toast('❌ ' + err.message, 'error'); return; }
+    }
+    if (suggestBox) suggestBox.innerHTML = '';
+});
+
+setupCustomerMatch('d');
+setupCustomerMatch('sd');
+
 function renderSuppliersTable() {
     document.getElementById('suppliersTable').innerHTML = suppliers.length ? suppliers.map(s => `
         <tr><td class="batch-id">${s.supplier_code}</td><td>${s.name}</td>
@@ -1011,11 +1080,17 @@ function refreshSampleDeliverySourceOptions() {
 }
 
 document.getElementById('dAddSource').addEventListener('click', addDeliverySourceRow);
-document.getElementById('deliveryForm').addEventListener('reset', () => setTimeout(initDSources, 0));
+document.getElementById('deliveryForm').addEventListener('reset', () => {
+    setTimeout(initDSources, 0);
+    document.getElementById('dCustomerSuggest').innerHTML = '';
+});
 document.getElementById('dTanggal').value = todayStr();
 
 document.getElementById('sdAddSource').addEventListener('click', addSampleDeliverySourceRow);
-document.getElementById('sampleDeliveryForm').addEventListener('reset', () => setTimeout(initSdSources, 0));
+document.getElementById('sampleDeliveryForm').addEventListener('reset', () => {
+    setTimeout(initSdSources, 0);
+    document.getElementById('sdCustomerSuggest').innerHTML = '';
+});
 document.getElementById('sdTanggal').value = todayStr();
 
 function collectDeliverySources(prefix) {

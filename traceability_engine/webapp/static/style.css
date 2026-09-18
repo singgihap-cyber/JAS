@@ -86,6 +86,9 @@ td { padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12.5px; 
 .badge-danger { background: rgba(244,67,54,0.15); color: var(--danger); }
 .badge-primary { background: rgba(33,150,243,0.15); color: var(--primary); }
 .badge-gray { background: var(--surface-dark); color: var(--text-secondary); }
+.customer-suggest { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; }
+.suggest-chip { cursor: pointer; border: none; font: inherit; }
+.suggest-chip:hover { filter: brightness(1.15); }
 .info-box {
     background: rgba(33,150,243,0.08); border: 1px solid rgba(33,150,243,0.2);
     border-radius: 6px; padding: 11px 13px; margin-bottom: 16px; font-size: 12px;

@@ -530,11 +530,13 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Perusahaan Penerima</label>
-                            <input class="form-input" id="dPerusahaan" placeholder="mis. LIBERTA GELATO">
+                            <input class="form-input" id="dPerusahaan" placeholder="mis. LIBERTA GELATO" autocomplete="off">
+                            <div id="dCustomerSuggest" class="customer-suggest"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Customer (opsional, master data)</label>
                             <select class="form-select" id="dCustomer"><option value="">Tidak diatribusikan (recipient tetap dicatat sebagai teks)</option></select>
+                            <div class="form-hint">Saran otomatis muncul di bawah kolom Perusahaan Penerima saat mengetik (Fase 21) — pencocokan pembantu, tidak mengikat.</div>
                         </div>
                     </div>
 
@@ -619,11 +621,13 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Nama Penerima</label>
-                            <input class="form-input" id="sdPerusahaan">
+                            <input class="form-input" id="sdPerusahaan" autocomplete="off">
+                            <div id="sdCustomerSuggest" class="customer-suggest"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Customer (opsional, master data)</label>
                             <select class="form-select" id="sdCustomer"><option value="">Tidak diatribusikan</option></select>
+                            <div class="form-hint">Saran otomatis muncul di bawah kolom Nama Penerima saat mengetik (Fase 21) — pencocokan pembantu, tidak mengikat.</div>
                         </div>
                     </div>
                     <div class="form-row">
@@ -673,8 +677,13 @@
                     <code>Customer</code> adalah master data opsional — mengisinya TIDAK wajib. Nama
                     perusahaan/penerima (<code>PERUSAHAAN</code>/<code>NAMA</code>) tetap selalu dicatat sebagai
                     teks bebas di kolom Shipment terlepas dari apakah Customer dipilih (services/delivery.py #7).
-                    Belum ada pencocokan otomatis nama perusahaan bebas → Customer — [BELUM DIKONFIRMASI]
-                    (Fase 12 poin 7).
+                    Sejak Fase 21, mengetik di kolom Perusahaan Penerima/Nama Penerima pada form Delivery/Sample
+                    Delivery di atas menampilkan saran <code>Customer</code> yang mirip (pencocokan
+                    exact + fuzzy, lihat <code>services/customer_matching.py</code>) — saran ini HANYA usulan,
+                    tidak pernah otomatis mengisi <code>customer_id</code>; operator tetap yang memutuskan lewat
+                    dropdown Customer. Kasus nama yang sangat berbeda antar dokumen (mis. "MALIK SABYTAEV" vs
+                    "MALIK S/RUSIA") masih tidak akan cocok otomatis — tetap [BELUM DIKONFIRMASI], lihat
+                    <code>customer_matching.py</code> keputusan #4.
                 </div>
                 <form id="customerForm" style="display:flex;gap:8px;margin-bottom:14px;align-items:end">
                     <div class="form-group" style="flex:2;margin-bottom:0">

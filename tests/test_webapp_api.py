@@ -1063,6 +1063,47 @@ def test_customers_roundtrip(client):
     assert any(c["customer_id"] == customer_id and c["name"] == "LIBERTA GELATO" for c in customers)
 
 
+# --------------------------------------------------------- customer matching (Fase 21)
+# The matching algorithm itself (normalization, exact-vs-fuzzy scoring,
+# threshold, limit) is already covered at the service layer in
+# test_customer_matching.py -- these confirm the thin GET /customers/match
+# wiring (query params, response shaping) works end-to-end through HTTP,
+# same split of responsibility as every other stage's webapp-vs-service
+# test pair in this suite.
+def test_customers_match_exact(client):
+    customer_id = client.post("/api/customers", json={"name": "LIBERTA GELATO"}).json()["customer_id"]
+    r = client.get("/api/customers/match", params={"q": "liberta gelato"})
+    assert r.status_code == 200, r.text
+    results = r.json()
+    assert len(results) == 1
+    assert results[0] == {
+        "customer_id": customer_id,
+        "name": "LIBERTA GELATO",
+        "score": 1.0,
+        "exact": True,
+    }
+
+
+def test_customers_match_no_suggestion_is_an_empty_list_not_an_error(client):
+    client.post("/api/customers", json={"name": "LIBERTA GELATO"})
+    r = client.get("/api/customers/match", params={"q": "SOMETHING ENTIRELY UNRELATED"})
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+
+
+def test_customers_match_requires_nonempty_q(client):
+    r = client.get("/api/customers/match", params={"q": ""})
+    assert r.status_code == 422
+
+
+def test_customers_match_respects_limit_param(client):
+    for i in range(5):
+        client.post("/api/customers", json={"name": f"MCC {i}"})
+    r = client.get("/api/customers/match", params={"q": "MCC", "limit": 2})
+    assert r.status_code == 200, r.text
+    assert len(r.json()) == 2
+
+
 def test_delivery_full_depletion_returns_shipment_and_ships_batch(client, supplier_id, pic_id):
     r = client.post(
         "/api/receiving",
