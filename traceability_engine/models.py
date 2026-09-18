@@ -77,6 +77,31 @@ class Customer(Base):
     name: Mapped[str] = mapped_column(String(200))
 
 
+class CustomerAlias(Base):
+    """Fase 21 (lanjutan) -- a confirmed synonym/variant name for a
+    `Customer`, e.g. PT JAS confirming "MALIK S/RUSIA" (PD's recorded
+    recipient name) and "MALIK SABYTAEV" (Packing's recorded buyer name,
+    `services/delivery.py` #2) are the same real customer. This is a
+    human-confirmed identity claim, not a guess -- distinct from the
+    fuzzy-similarity suggestions in `services/customer_matching.py`, a
+    match via an alias is treated with the same certainty as matching
+    `Customer.name` itself (`customer_matching.py` module docstring #5).
+    No DB-level uniqueness constraint on `alias` text here (SQLite/
+    PostgreSQL portability -- see `_enum_column()` note above for the same
+    reasoning applied elsewhere in this file); conflict checking is done at
+    the service layer (`services/customer_matching.add_customer_alias()`)
+    instead, consistent with "keep business logic separate from
+    persistence" (CLAUDE.md)."""
+
+    __tablename__ = "customer_aliases"
+
+    alias_id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.customer_id"), index=True)
+    alias: Mapped[str] = mapped_column(String(200))
+
+    customer: Mapped["Customer"] = relationship()
+
+
 class User(Base):
     __tablename__ = "users"
 

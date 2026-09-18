@@ -681,9 +681,13 @@
                     Delivery di atas menampilkan saran <code>Customer</code> yang mirip (pencocokan
                     exact + fuzzy, lihat <code>services/customer_matching.py</code>) — saran ini HANYA usulan,
                     tidak pernah otomatis mengisi <code>customer_id</code>; operator tetap yang memutuskan lewat
-                    dropdown Customer. Kasus nama yang sangat berbeda antar dokumen (mis. "MALIK SABYTAEV" vs
-                    "MALIK S/RUSIA") masih tidak akan cocok otomatis — tetap [BELUM DIKONFIRMASI], lihat
-                    <code>customer_matching.py</code> keputusan #4.
+                    dropdown Customer. Untuk nama yang sangat berbeda antar dokumen tapi merujuk customer yang
+                    sama (mis. "MALIK SABYTAEV" vs "MALIK S/RUSIA" — sudah dikonfirmasi PT JAS sebagai orang yang
+                    sama), tambahkan sebagai <b>Alias</b> pada tabel Customer di bawah — begitu tersimpan, mengetik
+                    alias tsb akan langsung dianggap cocok pasti (exact), bukan sekadar saran fuzzy. Pasangan
+                    nama tanpa kesamaan string sama sekali yang BELUM dikonfirmasi tetap [BELUM DIKONFIRMASI]
+                    sampai ditambahkan sebagai alias secara manual, lihat <code>customer_matching.py</code>
+                    keputusan #5.
                 </div>
                 <form id="customerForm" style="display:flex;gap:8px;margin-bottom:14px;align-items:end">
                     <div class="form-group" style="flex:2;margin-bottom:0">
@@ -694,7 +698,7 @@
                 </form>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>ID</th><th>Nama</th></tr></thead>
+                        <thead><tr><th>ID</th><th>Nama</th><th>Alias</th></tr></thead>
                         <tbody id="customersTable"></tbody>
                     </table>
                 </div>

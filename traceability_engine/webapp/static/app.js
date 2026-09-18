@@ -50,6 +50,7 @@ let suppliers = [];
 let users = [];
 let batches = [];
 let customers = [];
+let customerAliases = []; // Fase 21 lanjutan -- flat list from GET /customer-aliases, {alias_id, customer_id, alias}
 
 // ─── NAVIGATION ─────────────────────────────────────────────────────────
 const PAGE_TITLES = {
@@ -81,6 +82,7 @@ async function loadMasterData() {
     suppliers = await api('GET', '/suppliers');
     users = await api('GET', '/users');
     customers = await api('GET', '/customers');
+    customerAliases = await api('GET', '/customer-aliases');
     renderSupplierSelect();
     renderPicSelects();
     renderCustomerSelects();
@@ -111,10 +113,37 @@ function renderCustomerSelects() {
 }
 
 function renderCustomersTable() {
-    document.getElementById('customersTable').innerHTML = customers.length ? customers.map(c => `
-        <tr><td class="batch-id">#${c.customer_id}</td><td>${c.name}</td></tr>
-    `).join('') : '<tr><td colspan="2" style="text-align:center;color:var(--text-secondary)">Belum ada customer</td></tr>';
+    document.getElementById('customersTable').innerHTML = customers.length ? customers.map(c => {
+        const aliasesForCustomer = customerAliases.filter(a => a.customer_id === c.customer_id);
+        const aliasBadges = aliasesForCustomer.map(a => `<span class="badge badge-gray">${a.alias}</span>`).join(' ');
+        return `<tr>
+            <td class="batch-id">#${c.customer_id}</td>
+            <td>${c.name}</td>
+            <td>
+                <div class="customer-suggest" style="margin:0 0 6px 0">${aliasBadges}</div>
+                <div style="display:flex;gap:4px">
+                    <input class="form-input" style="padding:4px 8px;font-size:12px" placeholder="Tambah alias — mis. MALIK S/RUSIA" data-alias-input="${c.customer_id}">
+                    <button type="button" class="btn btn-secondary btn-small" data-alias-add="${c.customer_id}">+ Alias</button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--text-secondary)">Belum ada customer</td></tr>';
 }
+
+document.getElementById('customersTable').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-alias-add]');
+    if (!btn) return;
+    const customerId = btn.dataset.aliasAdd;
+    const input = document.querySelector(`[data-alias-input="${customerId}"]`);
+    const alias = input.value.trim();
+    if (!alias) { toast('Isi teks alias dulu.', 'error'); return; }
+    try {
+        await api('POST', `/customers/${customerId}/aliases`, { alias });
+        toast('✅ Alias ditambahkan — kini dianggap cocok pasti (exact) saat dipakai di form Delivery.', 'success', 5000);
+        customerAliases = await api('GET', '/customer-aliases');
+        renderCustomersTable();
+    } catch (err) { toast('❌ ' + err.message, 'error'); }
+});
 
 document.getElementById('customerForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -161,7 +190,10 @@ function renderCustomerSuggestions(prefix, query, candidates) {
     if (!suggestBox) return;
     const chips = candidates.map(c => {
         const pct = Math.round(c.score * 100);
-        const label = c.exact ? `✓ ${c.name}` : `${c.name} (~${pct}%)`;
+        let label;
+        if (c.matched_alias) label = `✓ ${c.name} (alias: "${c.matched_alias}")`;
+        else if (c.exact) label = `✓ ${c.name}`;
+        else label = `${c.name} (~${pct}%)`;
         return `<button type="button" class="badge ${c.exact ? 'badge-success' : 'badge-primary'} suggest-chip" data-prefix="${prefix}" data-customer-id="${c.customer_id}">${label}</button>`;
     }).join('');
     const noneHint = chips ? '' : '<span class="form-hint" style="margin:0">Tidak ada customer serupa.</span>';

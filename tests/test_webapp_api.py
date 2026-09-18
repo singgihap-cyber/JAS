@@ -1081,6 +1081,7 @@ def test_customers_match_exact(client):
         "name": "LIBERTA GELATO",
         "score": 1.0,
         "exact": True,
+        "matched_alias": None,
     }
 
 
@@ -1102,6 +1103,48 @@ def test_customers_match_respects_limit_param(client):
     r = client.get("/api/customers/match", params={"q": "MCC", "limit": 2})
     assert r.status_code == 200, r.text
     assert len(r.json()) == 2
+
+
+# --------------------------------------------------------- customer aliases (Fase 21 lanjutan)
+# The alias conflict-checking/idempotency itself is already covered at the
+# service layer in test_customer_matching.py -- these confirm the HTTP
+# wiring (path param, 422 on ValueError via the app-level handler, response
+# shaping) for the real confirmed pair (PT JAS, 2026-09-18): "MALIK
+# SABYTAEV" and "MALIK S/RUSIA" are the same customer.
+def test_customer_alias_roundtrip_and_exact_match(client):
+    customer_id = client.post("/api/customers", json={"name": "MALIK SABYTAEV"}).json()["customer_id"]
+
+    r = client.post(f"/api/customers/{customer_id}/aliases", json={"alias": "MALIK S/RUSIA"})
+    assert r.status_code == 201, r.text
+    alias_body = r.json()
+    assert alias_body["customer_id"] == customer_id
+    assert alias_body["alias"] == "MALIK S/RUSIA"
+
+    per_customer = client.get(f"/api/customers/{customer_id}/aliases").json()
+    assert any(a["alias"] == "MALIK S/RUSIA" for a in per_customer)
+
+    flat = client.get("/api/customer-aliases").json()
+    assert any(a["alias"] == "MALIK S/RUSIA" and a["customer_id"] == customer_id for a in flat)
+
+    matches = client.get("/api/customers/match", params={"q": "malik s/rusia"}).json()
+    assert len(matches) == 1
+    assert matches[0]["customer_id"] == customer_id
+    assert matches[0]["exact"] is True
+    assert matches[0]["matched_alias"] == "MALIK S/RUSIA"
+
+
+def test_customer_alias_conflict_returns_422(client):
+    malik_id = client.post("/api/customers", json={"name": "MALIK SABYTAEV"}).json()["customer_id"]
+    client.post("/api/customers", json={"name": "MALIK S/RUSIA"})  # already exists as its own customer
+
+    r = client.post(f"/api/customers/{malik_id}/aliases", json={"alias": "MALIK S/RUSIA"})
+    assert r.status_code == 422, r.text
+    assert r.json()["error"] == "invalid_input"
+
+
+def test_customer_alias_unknown_customer_returns_422(client):
+    r = client.post("/api/customers/99999/aliases", json={"alias": "ANYTHING"})
+    assert r.status_code == 422, r.text
 
 
 def test_delivery_full_depletion_returns_shipment_and_ships_batch(client, supplier_id, pic_id):

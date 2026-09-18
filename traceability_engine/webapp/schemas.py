@@ -60,12 +60,26 @@ class CustomerOut(BaseModel):
 class CustomerMatchOut(BaseModel):
     """Fase 21 -- one ranked suggestion from `services/customer_matching.py`.
     Suggestion-only; the caller decides whether/what to do with it (module
-    docstring #1) -- this schema carries no side effect."""
+    docstring #1) -- this schema carries no side effect. `matched_alias` is
+    set when this hit came from a confirmed `CustomerAlias` rather than
+    `Customer.name` itself or a fuzzy score (module docstring #5)."""
 
     customer_id: int
     name: str
     score: float
     exact: bool
+    matched_alias: Optional[str] = None
+
+
+class CustomerAliasCreate(BaseModel):
+    alias: str = Field(..., max_length=200)
+
+
+class CustomerAliasOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    alias_id: int
+    customer_id: int
+    alias: str
 
 
 # --------------------------------------------------------------------- batch

@@ -4,9 +4,12 @@ the service layer (mirrors test_receiving.py/test_qc_md.py-style unit
 tests, distinct from the HTTP-level coverage in test_webapp_api.py)."""
 from __future__ import annotations
 
-from traceability_engine.models import Customer
+import pytest
+
+from traceability_engine.models import Customer, CustomerAlias
 from traceability_engine.services.customer_matching import (
     SUGGESTION_THRESHOLD,
+    add_customer_alias,
     match_customer,
     normalize_name,
 )
@@ -126,3 +129,96 @@ def test_match_customer_ignores_blank_name_rows(session):
     _add_customer(session, "")
     matches = match_customer(session, "ANYTHING")
     assert matches == []
+
+
+# --- add_customer_alias / alias-aware matching (Fase 21 lanjutan) --------
+# PT JAS confirmed 2026-09-18 that "MALIK SABYTAEV" (Packing's PEMBELI) and
+# "MALIK S/RUSIA" (PD's PERUSAHAAN) are the same real customer -- this is
+# no longer the "genuinely unsolved" case from module docstring #4; it is
+# now solvable via a recorded CustomerAlias, tested below with that exact
+# real pair.
+
+
+def test_add_customer_alias_creates_row(session):
+    c = _add_customer(session, "MALIK SABYTAEV")
+    alias = add_customer_alias(session, c.customer_id, "MALIK S/RUSIA")
+    assert alias.customer_id == c.customer_id
+    assert alias.alias == "MALIK S/RUSIA"
+    stored = session.query(CustomerAlias).all()
+    assert len(stored) == 1
+
+
+def test_add_customer_alias_unknown_customer_raises(session):
+    with pytest.raises(ValueError):
+        add_customer_alias(session, 999, "SOME ALIAS")
+
+
+def test_add_customer_alias_empty_text_raises(session):
+    c = _add_customer(session, "MALIK SABYTAEV")
+    with pytest.raises(ValueError):
+        add_customer_alias(session, c.customer_id, "   ")
+
+
+def test_add_customer_alias_idempotent_for_same_customer(session):
+    c = _add_customer(session, "MALIK SABYTAEV")
+    first = add_customer_alias(session, c.customer_id, "MALIK S/RUSIA")
+    second = add_customer_alias(session, c.customer_id, "malik s rusia")  # same normalized text
+    assert first.alias_id == second.alias_id
+    assert len(session.query(CustomerAlias).all()) == 1
+
+
+def test_add_customer_alias_conflicts_with_another_customers_name(session):
+    malik = _add_customer(session, "MALIK SABYTAEV")
+    _add_customer(session, "MALIK S/RUSIA")  # someone already created this as its OWN customer row
+    with pytest.raises(ValueError):
+        add_customer_alias(session, malik.customer_id, "MALIK S/RUSIA")
+
+
+def test_add_customer_alias_conflicts_with_another_customers_alias(session):
+    malik = _add_customer(session, "MALIK SABYTAEV")
+    other = _add_customer(session, "SGS VIETNAM")
+    add_customer_alias(session, other.customer_id, "MALIK S/RUSIA")
+    with pytest.raises(ValueError):
+        add_customer_alias(session, malik.customer_id, "MALIK S/RUSIA")
+
+
+def test_match_customer_via_alias_is_exact(session):
+    c = _add_customer(session, "MALIK SABYTAEV")
+    add_customer_alias(session, c.customer_id, "MALIK S/RUSIA")
+
+    matches = match_customer(session, "MALIK S/RUSIA")
+    assert len(matches) == 1
+    assert matches[0].customer_id == c.customer_id
+    assert matches[0].exact is True
+    assert matches[0].score == 1.0
+    assert matches[0].matched_alias == "MALIK S/RUSIA"
+
+
+def test_match_customer_via_alias_is_case_and_punctuation_insensitive(session):
+    c = _add_customer(session, "MALIK SABYTAEV")
+    add_customer_alias(session, c.customer_id, "MALIK S/RUSIA")
+
+    matches = match_customer(session, "  malik s rusia  ")
+    assert len(matches) == 1
+    assert matches[0].customer_id == c.customer_id
+    assert matches[0].exact is True
+
+
+def test_match_customer_name_match_has_no_matched_alias(session):
+    c = _add_customer(session, "MALIK SABYTAEV")
+    add_customer_alias(session, c.customer_id, "MALIK S/RUSIA")
+
+    matches = match_customer(session, "MALIK SABYTAEV")
+    assert len(matches) == 1
+    assert matches[0].exact is True
+    assert matches[0].matched_alias is None
+
+
+def test_match_customer_alias_of_one_customer_does_not_leak_to_another(session):
+    malik = _add_customer(session, "MALIK SABYTAEV")
+    add_customer_alias(session, malik.customer_id, "MALIK S/RUSIA")
+    _add_customer(session, "SGS VIETNAM")
+
+    matches = match_customer(session, "SGS VIETNAM")
+    assert len(matches) == 1
+    assert matches[0].matched_alias is None

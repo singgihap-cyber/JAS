@@ -16,6 +16,11 @@ front; `Shipment.recipient` (free text) is always recorded regardless, so
 leaving `customer_id` unset remains a fully supported path, not a degraded
 one -- matching only assists that choice, per customer_matching.py #1 it
 never makes it automatically.
+
+Fase 21 lanjutan adds `CustomerAlias` CRUD-lite (list/create per customer,
+plus a flat `GET /customer-aliases` for the UI to avoid an N+1 fetch) --
+same "no business logic in the router" split, all conflict-checking lives
+in `services/customer_matching.add_customer_alias()`.
 """
 from __future__ import annotations
 
@@ -24,10 +29,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...enums import UserRole
-from ...models import Customer, Supplier, User
-from ...services.customer_matching import match_customer
+from ...models import Customer, CustomerAlias, Supplier, User
+from ...services.customer_matching import add_customer_alias, match_customer
 from ..database import get_db
 from ..schemas import (
+    CustomerAliasCreate,
+    CustomerAliasOut,
     CustomerCreate,
     CustomerMatchOut,
     CustomerOut,
@@ -94,6 +101,49 @@ def match_customers(
     this router to shadow.
     """
     return [
-        CustomerMatchOut(customer_id=m.customer_id, name=m.name, score=m.score, exact=m.exact)
+        CustomerMatchOut(
+            customer_id=m.customer_id,
+            name=m.name,
+            score=m.score,
+            exact=m.exact,
+            matched_alias=m.matched_alias,
+        )
         for m in match_customer(db, q, limit=limit)
     ]
+
+
+@router.get("/customer-aliases", response_model=list[CustomerAliasOut])
+def list_all_customer_aliases(db: Session = Depends(get_db)):
+    """Fase 21 lanjutan -- every recorded alias, flat (not scoped to one
+    customer). Exists so the UI can render aliases next to each customer in
+    one call instead of N+1 (one per customer)."""
+    return db.execute(select(CustomerAlias).order_by(CustomerAlias.alias)).scalars().all()
+
+
+@router.get("/customers/{customer_id}/aliases", response_model=list[CustomerAliasOut])
+def list_customer_aliases(customer_id: int, db: Session = Depends(get_db)):
+    return (
+        db.execute(
+            select(CustomerAlias)
+            .where(CustomerAlias.customer_id == customer_id)
+            .order_by(CustomerAlias.alias)
+        )
+        .scalars()
+        .all()
+    )
+
+
+@router.post("/customers/{customer_id}/aliases", response_model=CustomerAliasOut, status_code=201)
+def create_customer_alias(customer_id: int, payload: CustomerAliasCreate, db: Session = Depends(get_db)):
+    """Fase 21 lanjutan -- record a confirmed alias for `customer_id`
+    (`services/customer_matching.add_customer_alias()`). Raises 422 (via the
+    app-level `ValueError` handler, `webapp/main.py`) if the alias text is
+    empty or already resolves to a *different* Customer -- a contradictory
+    mapping is refused, not silently overwritten (customer_matching.py #5).
+    A path parameter (not a query/body field) for `customer_id`, consistent
+    with this being scoped to one customer's alias list, mirrored by the GET
+    above.
+    """
+    alias = add_customer_alias(db, customer_id, payload.alias)
+    db.flush()
+    return alias
