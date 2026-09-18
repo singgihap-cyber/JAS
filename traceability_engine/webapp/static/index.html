@@ -8,13 +8,15 @@
 </head>
 <body>
 <div class="sidebar">
-    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 4</small></div>
+    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 5</small></div>
     <div class="nav">
         <button class="nav-item active" data-page="dashboard">📊 Dashboard</button>
         <button class="nav-item" data-page="batch-input">📥 Penerimaan Barang</button>
         <button class="nav-item" data-page="proses">⚙️ Input Proses</button>
         <button class="nav-item" data-page="mixing">🥣 Mixing</button>
         <button class="nav-item" data-page="vacuum-packing">🧴 Vacuum &amp; Packing</button>
+        <button class="nav-item" data-page="delivery">🚚 Pengiriman</button>
+        <button class="nav-item" data-page="adjustment">🛠️ Penyesuaian &amp; Rejeksi</button>
         <button class="nav-item" data-page="batch-list">📋 Daftar Batch</button>
         <button class="nav-item" data-page="batch-history">🔍 Batch History</button>
         <button class="nav-item" data-page="stock">📦 Stock Monitoring</button>
@@ -35,12 +37,13 @@
             <div class="section">
                 <div class="section-title">📈 Ringkasan Batch Aktif</div>
                 <div class="info-box">
-                    Slice 1+2+3+4 Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming, Sundrying,
+                    Slice 1+2+3+4+5 Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming, Sundrying,
                     Sortasi, Mixing, Grinding &amp; Sieving, Magnetization, Metal Detection Powder, Rework,
-                    Vacuum, Packing, Stock Monitoring, Batch History (chain-of-custody)</strong> sudah tersambung
-                    penuh ke engine (10 dari 12 modul). Tahap lain (Delivery + Sample Delivery, Adjustment)
-                    menyusul di sesi berikutnya — struktur router/halaman ini memang dirancang supaya tahap baru
-                    cukup ditambahkan, bukan dibangun ulang.
+                    Vacuum, Packing, Delivery, Sample Delivery, Adjustment, Stock Monitoring, Batch History
+                    (chain-of-custody)</strong> sudah tersambung penuh ke engine — <strong>12 dari 12 modul</strong>,
+                    Fase 15 lengkap. Catatan: alur Hijau (green-curing — Main Curing, 1st/2nd/3rd Curing,
+                    Airdrying) masih belum punya modul <code>services/*.py</code> sendiri sama sekali (gap engine
+                    dari fase-fase sebelumnya, di luar scope Fase 15 UI), jadi belum ada di UI manapun.
                 </div>
                 <div class="table-container">
                     <table>
@@ -474,6 +477,322 @@
                     <table>
                         <thead><tr><th>Tanggal</th><th>Sumber</th><th>Batch Baru</th><th>Bruto</th><th>Netto</th><th>Tara</th><th>Deskripsi</th><th>PIC</th></tr></thead>
                         <tbody id="packingTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- DELIVERY (PD) + SAMPLE DELIVERY (SmpD) -->
+        <div class="page" id="delivery">
+            <div class="section">
+                <div class="section-title">🚚 Product Delivery (PD)</div>
+                <div class="info-box">
+                    STOCK-OUT — batch sumber dikonsumsi habis/sebagian, <strong>tidak ada batch baru dibuat</strong>
+                    (services/delivery.py). <code>NETTO</code> = jumlah qty batch sumber, <code>TARA</code> =
+                    Bruto − Netto — keduanya dihitung otomatis oleh engine, tidak dihitung ulang di form ini
+                    (services/delivery.py #3). Batch sumber yang habis terkonsumsi otomatis ditandai
+                    <strong>SHIPPED</strong> oleh engine (#8), bukan CONSUMED.
+                </div>
+                <form id="deliveryForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Tanggal <span style="color:var(--danger)">*</span></label>
+                            <input type="date" class="form-input" id="dTanggal" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">PIC <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="dPic" required></select>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">🔗 Batch Sumber (minimal 1)</div>
+                    <div id="dSources"></div>
+                    <button type="button" class="btn btn-secondary btn-small" id="dAddSource" style="margin-bottom:12px">+ Tambah Sumber Batch</button>
+
+                    <div class="form-divider">⚖️ Berat</div>
+                    <div class="form-group">
+                        <label class="form-label">Bruto (kg) <span style="color:var(--danger)">*</span></label>
+                        <input type="number" class="form-input" id="dBruto" step="0.001" min="0" required>
+                        <div class="form-hint">Netto &amp; Tara dihitung otomatis dari total batch sumber dan Bruto.</div>
+                    </div>
+
+                    <div class="form-divider">📦 Nomor Pengiriman &amp; Tujuan</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Nomor Pengiriman</label>
+                            <input class="form-input" id="dNomorKirim" placeholder="mis. DN/G/260120-001">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Tujuan (Lokasi)</label>
+                            <input class="form-input" id="dTujuan" placeholder="mis. Tangerang">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Perusahaan Penerima</label>
+                            <input class="form-input" id="dPerusahaan" placeholder="mis. LIBERTA GELATO">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Customer (opsional, master data)</label>
+                            <select class="form-select" id="dCustomer"><option value="">Tidak diatribusikan (recipient tetap dicatat sebagai teks)</option></select>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">🚛 Ekspedisi &amp; Kondisi (opsional)</div>
+                    <div class="form-row-3">
+                        <div class="form-group">
+                            <label class="form-label">Jenis Ekspedisi</label>
+                            <input class="form-input" id="dEkspedisi">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Kondisi Angkut</label>
+                            <input class="form-input" id="dKondisiAngkut">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Kondisi Kemasan</label>
+                            <input class="form-input" id="dKondisiKemasan">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Qty Box (Coly)</label>
+                        <input type="number" class="form-input" id="dColy" step="1" min="0">
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Simpan Delivery</button>
+                        <button type="reset" class="btn btn-secondary" id="dResetBtn">Reset</button>
+                    </div>
+                </form>
+            </div>
+            <div class="section">
+                <div class="section-title">📊 Riwayat Delivery</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Tanggal</th><th>Sumber</th><th>No. Pengiriman</th><th>Tujuan</th><th>Netto</th><th>Tara</th><th>PIC</th></tr></thead>
+                        <tbody id="deliveryTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">🧪 Sample Delivery (SmpD)</div>
+                <div class="info-box">
+                    Sama persis strukturnya dengan Product Delivery di atas, hanya beda <code>event_type</code>
+                    (<code>SAMPLE_DELIVERY</code>) — setiap transaksi stok yang dihasilkan otomatis ditandai
+                    <code>is_sample=true</code> oleh engine (services/delivery.py #10), tidak diatur manual di
+                    sini. Ada tambahan field Deskripsi Vanila (dicatat sebagai catatan, bukan kolom batch/shipment).
+                </div>
+                <form id="sampleDeliveryForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Tanggal <span style="color:var(--danger)">*</span></label>
+                            <input type="date" class="form-input" id="sdTanggal" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">PIC <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="sdPic" required></select>
+                        </div>
+                    </div>
+
+                    <div class="form-divider">🔗 Batch Sumber (minimal 1)</div>
+                    <div id="sdSources"></div>
+                    <button type="button" class="btn btn-secondary btn-small" id="sdAddSource" style="margin-bottom:12px">+ Tambah Sumber Batch</button>
+
+                    <div class="form-divider">⚖️ Berat</div>
+                    <div class="form-group">
+                        <label class="form-label">Bruto (kg) <span style="color:var(--danger)">*</span></label>
+                        <input type="number" class="form-input" id="sdBruto" step="0.001" min="0" required>
+                        <div class="form-hint">Netto &amp; Tara dihitung otomatis dari total batch sumber dan Bruto.</div>
+                    </div>
+
+                    <div class="form-divider">📦 Nomor Pengiriman &amp; Tujuan</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Nomor Pengiriman</label>
+                            <input class="form-input" id="sdNomorKirim">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Tujuan (Alamat)</label>
+                            <input class="form-input" id="sdTujuan">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Nama Penerima</label>
+                            <input class="form-input" id="sdPerusahaan">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Customer (opsional, master data)</label>
+                            <select class="form-select" id="sdCustomer"><option value="">Tidak diatribusikan</option></select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Deskripsi Vanila</label>
+                            <input class="form-input" id="sdDesc" placeholder="mis. EP / EG / GOURMET / POWDER">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Qty Box (Coly)</label>
+                            <input type="number" class="form-input" id="sdColy" step="1" min="0">
+                        </div>
+                    </div>
+                    <div class="form-row-3">
+                        <div class="form-group">
+                            <label class="form-label">Jenis Ekspedisi</label>
+                            <input class="form-input" id="sdEkspedisi">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Kondisi Angkut</label>
+                            <input class="form-input" id="sdKondisiAngkut">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Kondisi Kemasan</label>
+                            <input class="form-input" id="sdKondisiKemasan">
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Simpan Sample Delivery</button>
+                        <button type="reset" class="btn btn-secondary" id="sdResetBtn">Reset</button>
+                    </div>
+                </form>
+            </div>
+            <div class="section">
+                <div class="section-title">📊 Riwayat Sample Delivery</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Tanggal</th><th>Sumber</th><th>No. Pengiriman</th><th>Deskripsi</th><th>Netto</th><th>PIC</th></tr></thead>
+                        <tbody id="sampleDeliveryTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">🏢 Data Customer</div>
+                <div class="info-box">
+                    <code>Customer</code> adalah master data opsional — mengisinya TIDAK wajib. Nama
+                    perusahaan/penerima (<code>PERUSAHAAN</code>/<code>NAMA</code>) tetap selalu dicatat sebagai
+                    teks bebas di kolom Shipment terlepas dari apakah Customer dipilih (services/delivery.py #7).
+                    Belum ada pencocokan otomatis nama perusahaan bebas → Customer — [BELUM DIKONFIRMASI]
+                    (Fase 12 poin 7).
+                </div>
+                <form id="customerForm" style="display:flex;gap:8px;margin-bottom:14px;align-items:end">
+                    <div class="form-group" style="flex:2;margin-bottom:0">
+                        <label class="form-label">Nama Customer</label>
+                        <input class="form-input" id="newCustomerName" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">+ Tambah</button>
+                </form>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>ID</th><th>Nama</th></tr></thead>
+                        <tbody id="customersTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ADJUSTMENT (stock opname) + REJECTED/SUPERSEDED marking -->
+        <div class="page" id="adjustment">
+            <div class="section">
+                <div class="section-title">⚖️ Stok Opname / Adjustment</div>
+                <div class="warn-box">
+                    <strong>Hanya User berrole PRODUCTION_MANAGER yang boleh melakukan Adjustment</strong>
+                    (GENEALOGY.md §5.2). Belum ada mekanisme login/auth sungguhan di UI ini (lihat "Keputusan
+                    Fase 15 slice 1") — dropdown PIC di bawah menampilkan SEMUA user, tapi server akan menolak
+                    (403) kalau PIC yang dipilih bukan PRODUCTION_MANAGER. Alasan koreksi WAJIB diisi.
+                </div>
+                <form id="adjustmentForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Batch <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="ajBatch" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Tanggal <span style="color:var(--danger)">*</span></label>
+                            <input type="date" class="form-input" id="ajTanggal" required>
+                        </div>
+                    </div>
+                    <div class="form-hint" id="ajCurrentQty" style="margin-bottom:10px">Qty saat ini: –</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Qty Baru (Hasil Stok Opname, kg) <span style="color:var(--danger)">*</span></label>
+                            <input type="number" class="form-input" id="ajNewQty" step="0.001" min="0" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">PIC (harus PRODUCTION_MANAGER) <span style="color:var(--danger)">*</span></label>
+                            <select class="form-select" id="ajPic" required></select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Alasan / Catatan <span style="color:var(--danger)">*</span></label>
+                        <input class="form-input" id="ajNotes" placeholder="mis. Selisih stok opname fisik gudang" required>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                        <button type="submit" class="btn btn-primary">✅ Simpan Adjustment</button>
+                        <button type="reset" class="btn btn-secondary">Reset</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="section">
+                <div class="section-title">🚫 Tandai Batch REJECTED</div>
+                <div class="info-box">
+                    Tidak ada threshold KA/AW numerik (GENEALOGY.md §5.1) — reject/accept selalu keputusan manual
+                    PIC, bukan otomatis. Bisa dilakukan siapa saja (tidak gated role, sesuai signature
+                    <code>mark_batch_rejected()</code>).
+                </div>
+                <form id="rejectForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                    <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
+                        <label class="form-label">Batch</label>
+                        <select class="form-select" id="rjBatch" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
+                        <label class="form-label">PIC</label>
+                        <select class="form-select" id="rjPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan</label>
+                        <input class="form-input" id="rjReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Tandai Rejected</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <div class="section-title">🔄 Tandai Batch SUPERSEDED</div>
+                <div class="info-box">
+                    Untuk batch yang sudah di-relabel jadi nomor batch baru (mis. Downgrade/Upgrade via Sortasi,
+                    GENEALOGY.md §3.1/§3.2) — bukan berarti hilang, tetap bisa ditelusuri lewat Batch History.
+                </div>
+                <form id="supersedeForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                    <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
+                        <label class="form-label">Batch</label>
+                        <select class="form-select" id="ssBatch" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0">
+                        <label class="form-label">PIC</label>
+                        <select class="form-select" id="ssPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan</label>
+                        <input class="form-input" id="ssReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Tandai Superseded</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <div class="section-title">📜 Audit Log Terbaru (Batch)</div>
+                <div class="info-box">
+                    Mencakup ketiga aksi di atas (Adjustment, Reject, Supersede) — setiap perubahan status/qty
+                    lewat halaman ini selalu tercatat sebagai <code>AuditLog</code> (TEST_CASES.md #14), berbeda
+                    dari event proses biasa yang tercatat di <code>ProcessEvent</code>.
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Waktu</th><th>Batch</th><th>Aksi</th><th>Sebelum</th><th>Sesudah</th><th>Actor</th></tr></thead>
+                        <tbody id="auditLogTable"></tbody>
                     </table>
                 </div>
             </div>

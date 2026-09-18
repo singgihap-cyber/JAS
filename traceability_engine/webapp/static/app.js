@@ -49,11 +49,13 @@ function fmtQty(v) {
 let suppliers = [];
 let users = [];
 let batches = [];
+let customers = [];
 
 // ─── NAVIGATION ─────────────────────────────────────────────────────────
 const PAGE_TITLES = {
     dashboard: 'Dashboard', 'batch-input': 'Penerimaan Barang', proses: 'Input Proses',
-    mixing: 'Mixing', 'vacuum-packing': 'Vacuum & Packing', 'batch-list': 'Daftar Batch', 'batch-history': 'Batch History',
+    mixing: 'Mixing', 'vacuum-packing': 'Vacuum & Packing', delivery: 'Pengiriman', adjustment: 'Penyesuaian & Rejeksi',
+    'batch-list': 'Daftar Batch', 'batch-history': 'Batch History',
     stock: 'Stock Monitoring', suppliers: 'Data Supplier', users: 'User Management',
 };
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -68,6 +70,8 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'dashboard') renderDashboard();
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
+        if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
+        if (page === 'adjustment') renderAuditLog();
         if (page === 'stock') renderStockSummary();
     });
 });
@@ -76,10 +80,13 @@ document.querySelectorAll('.nav-item').forEach(btn => {
 async function loadMasterData() {
     suppliers = await api('GET', '/suppliers');
     users = await api('GET', '/users');
+    customers = await api('GET', '/customers');
     renderSupplierSelect();
     renderPicSelects();
+    renderCustomerSelects();
     renderSuppliersTable();
     renderUsersTable();
+    renderCustomersTable();
 }
 
 function renderSupplierSelect() {
@@ -92,8 +99,34 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic'].forEach(id => { document.getElementById(id).innerHTML = opts; });
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic']
+        .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
+
+function renderCustomerSelects() {
+    const opts = customers.map(c => `<option value="${c.customer_id}">${c.name}</option>`).join('');
+    ['dCustomer', 'sdCustomer'].forEach(id => {
+        document.getElementById(id).innerHTML = '<option value="">Tidak diatribusikan</option>' + opts;
+    });
+}
+
+function renderCustomersTable() {
+    document.getElementById('customersTable').innerHTML = customers.length ? customers.map(c => `
+        <tr><td class="batch-id">#${c.customer_id}</td><td>${c.name}</td></tr>
+    `).join('') : '<tr><td colspan="2" style="text-align:center;color:var(--text-secondary)">Belum ada customer</td></tr>';
+}
+
+document.getElementById('customerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        await api('POST', '/customers', { name: document.getElementById('newCustomerName').value.trim() });
+        toast('✅ Customer ditambahkan.', 'success');
+        document.getElementById('customerForm').reset();
+        customers = await api('GET', '/customers');
+        renderCustomerSelects();
+        renderCustomersTable();
+    } catch (err) { toast('❌ ' + err.message, 'error'); }
+});
 
 function renderSuppliersTable() {
     document.getElementById('suppliersTable').innerHTML = suppliers.length ? suppliers.map(s => `
@@ -357,8 +390,15 @@ function renderBatchSelect() {
     sel.innerHTML = html;
     const vSel = document.getElementById('vBatch');
     if (vSel) vSel.innerHTML = html;
+    ['ajBatch', 'rjBatch', 'ssBatch'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { const current = el.value; el.innerHTML = html; if (current) el.value = current; }
+    });
+    updateAdjustmentCurrentQty();
     refreshMixSourceOptions();
     refreshPackingSourceOptions();
+    refreshDeliverySourceOptions();
+    refreshSampleDeliverySourceOptions();
 }
 
 function renderProsesFields() {
@@ -826,6 +866,305 @@ async function renderPackingHistory() {
     }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada data Packing</td></tr>';
 }
 
+// ─── DELIVERY (PD) + SAMPLE DELIVERY (SmpD) -- both STOCK-OUT, no output
+// batch (services/delivery.py) -- own forms with dynamic source-batch
+// lists, same pattern as Packing's (min 1 source, not 2 like Mixing).
+// net_weight/tare_weight are never computed here, only ever displayed from
+// the API response (delivery.py #3). ───────────────────────────────────
+let dSourceSeq = 0;
+let sdSourceSeq = 0;
+
+function deliverySourceRowHtml(prefix, rowId) {
+    return `<div class="form-row ${prefix}-source-row" data-row-id="${rowId}" style="align-items:end">
+        <div class="form-group">
+            <label class="form-label">Batch Sumber</label>
+            <select class="form-select ${prefix}-src-batch" id="${prefix}SrcBatch${rowId}"><option value="">Pilih batch...</option></select>
+        </div>
+        <div class="form-group" style="display:flex;gap:8px;align-items:end">
+            <div style="flex:1">
+                <label class="form-label">Netto (kg)</label>
+                <input type="number" class="form-input ${prefix}-src-qty" id="${prefix}SrcQty${rowId}" step="0.001" min="0">
+            </div>
+            <button type="button" class="btn btn-secondary btn-small ${prefix}-src-remove">✕</button>
+        </div>
+    </div>`;
+}
+
+function addDeliverySourceRow() {
+    dSourceSeq += 1;
+    const host = document.getElementById('dSources');
+    host.insertAdjacentHTML('beforeend', deliverySourceRowHtml('d', dSourceSeq));
+    const row = host.lastElementChild;
+    row.querySelector('.d-src-batch').innerHTML = '<option value="">Pilih batch...</option>' + activeBatchOptionsHtml();
+    row.querySelector('.d-src-remove').addEventListener('click', () => {
+        if (host.children.length <= 1) { toast('Delivery butuh minimal 1 batch sumber.', 'error'); return; }
+        row.remove();
+    });
+}
+
+function initDSources() {
+    const host = document.getElementById('dSources');
+    host.innerHTML = '';
+    dSourceSeq = 0;
+    addDeliverySourceRow();
+}
+
+function refreshDeliverySourceOptions() {
+    const host = document.getElementById('dSources');
+    if (!host) return;
+    const opts = activeBatchOptionsHtml();
+    host.querySelectorAll('.d-src-batch').forEach(sel => {
+        const current = sel.value;
+        sel.innerHTML = '<option value="">Pilih batch...</option>' + opts;
+        if (current) sel.value = current;
+    });
+}
+
+function addSampleDeliverySourceRow() {
+    sdSourceSeq += 1;
+    const host = document.getElementById('sdSources');
+    host.insertAdjacentHTML('beforeend', deliverySourceRowHtml('sd', sdSourceSeq));
+    const row = host.lastElementChild;
+    row.querySelector('.sd-src-batch').innerHTML = '<option value="">Pilih batch...</option>' + activeBatchOptionsHtml();
+    row.querySelector('.sd-src-remove').addEventListener('click', () => {
+        if (host.children.length <= 1) { toast('Sample Delivery butuh minimal 1 batch sumber.', 'error'); return; }
+        row.remove();
+    });
+}
+
+function initSdSources() {
+    const host = document.getElementById('sdSources');
+    host.innerHTML = '';
+    sdSourceSeq = 0;
+    addSampleDeliverySourceRow();
+}
+
+function refreshSampleDeliverySourceOptions() {
+    const host = document.getElementById('sdSources');
+    if (!host) return;
+    const opts = activeBatchOptionsHtml();
+    host.querySelectorAll('.sd-src-batch').forEach(sel => {
+        const current = sel.value;
+        sel.innerHTML = '<option value="">Pilih batch...</option>' + opts;
+        if (current) sel.value = current;
+    });
+}
+
+document.getElementById('dAddSource').addEventListener('click', addDeliverySourceRow);
+document.getElementById('deliveryForm').addEventListener('reset', () => setTimeout(initDSources, 0));
+document.getElementById('dTanggal').value = todayStr();
+
+document.getElementById('sdAddSource').addEventListener('click', addSampleDeliverySourceRow);
+document.getElementById('sampleDeliveryForm').addEventListener('reset', () => setTimeout(initSdSources, 0));
+document.getElementById('sdTanggal').value = todayStr();
+
+function collectDeliverySources(prefix) {
+    const sources = [];
+    document.querySelectorAll(`#${prefix}Sources .${prefix}-source-row`).forEach(row => {
+        const batchId = row.querySelector(`.${prefix}-src-batch`).value;
+        const qty = row.querySelector(`.${prefix}-src-qty`).value;
+        if (batchId && qty) sources.push({ batch_id: Number(batchId), quantity: qty });
+    });
+    return sources;
+}
+
+document.getElementById('deliveryForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const picId = document.getElementById('dPic').value;
+    if (!picId) { toast('PIC harus dipilih.', 'error'); return; }
+
+    const sources = collectDeliverySources('d');
+    if (!sources.length) { toast('Isi minimal 1 batch sumber beserta netto-nya.', 'error'); return; }
+    const batchIds = sources.map(s => s.batch_id);
+    if (new Set(batchIds).size !== batchIds.length) { toast('Batch sumber tidak boleh duplikat.', 'error'); return; }
+
+    const bruto = document.getElementById('dBruto').value;
+    if (!bruto || Number(bruto) <= 0) { toast('Bruto harus lebih dari 0.', 'error'); return; }
+
+    const payload = {
+        event_date: document.getElementById('dTanggal').value,
+        pic_user_id: Number(picId),
+        sources,
+        gross_weight: bruto,
+        shipping_number: document.getElementById('dNomorKirim').value.trim() || null,
+        destination: document.getElementById('dTujuan').value.trim() || null,
+        recipient: document.getElementById('dPerusahaan').value.trim() || null,
+        expedition: document.getElementById('dEkspedisi').value.trim() || null,
+        transport_condition: document.getElementById('dKondisiAngkut').value.trim() || null,
+        packaging_condition: document.getElementById('dKondisiKemasan').value.trim() || null,
+        coly: document.getElementById('dColy').value || null,
+    };
+    const customerId = document.getElementById('dCustomer').value;
+    if (customerId) payload.customer_id = Number(customerId);
+
+    try {
+        const result = await api('POST', '/delivery', payload);
+        toast(`✅ Delivery tersimpan — netto ${fmtQty(result.shipment.net_weight)} kg`, 'success', 5000);
+        document.getElementById('deliveryForm').reset();
+        document.getElementById('dTanggal').value = todayStr();
+        initDSources();
+        await refreshBatches();
+        await renderDeliveryHistory();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+document.getElementById('sampleDeliveryForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const picId = document.getElementById('sdPic').value;
+    if (!picId) { toast('PIC harus dipilih.', 'error'); return; }
+
+    const sources = collectDeliverySources('sd');
+    if (!sources.length) { toast('Isi minimal 1 batch sumber beserta netto-nya.', 'error'); return; }
+    const batchIds = sources.map(s => s.batch_id);
+    if (new Set(batchIds).size !== batchIds.length) { toast('Batch sumber tidak boleh duplikat.', 'error'); return; }
+
+    const bruto = document.getElementById('sdBruto').value;
+    if (!bruto || Number(bruto) <= 0) { toast('Bruto harus lebih dari 0.', 'error'); return; }
+
+    const payload = {
+        event_date: document.getElementById('sdTanggal').value,
+        pic_user_id: Number(picId),
+        sources,
+        gross_weight: bruto,
+        shipping_number: document.getElementById('sdNomorKirim').value.trim() || null,
+        destination: document.getElementById('sdTujuan').value.trim() || null,
+        recipient: document.getElementById('sdPerusahaan').value.trim() || null,
+        description: document.getElementById('sdDesc').value.trim() || null,
+        expedition: document.getElementById('sdEkspedisi').value.trim() || null,
+        transport_condition: document.getElementById('sdKondisiAngkut').value.trim() || null,
+        packaging_condition: document.getElementById('sdKondisiKemasan').value.trim() || null,
+        coly: document.getElementById('sdColy').value || null,
+    };
+    const customerId = document.getElementById('sdCustomer').value;
+    if (customerId) payload.customer_id = Number(customerId);
+
+    try {
+        const result = await api('POST', '/sample-delivery', payload);
+        toast(`✅ Sample Delivery tersimpan — netto ${fmtQty(result.shipment.net_weight)} kg`, 'success', 5000);
+        document.getElementById('sampleDeliveryForm').reset();
+        document.getElementById('sdTanggal').value = todayStr();
+        initSdSources();
+        await refreshBatches();
+        await renderSampleDeliveryHistory();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+async function renderDeliveryHistory() {
+    const rows = await api('GET', '/deliveries?event_type=DELIVERY');
+    document.getElementById('deliveryTable').innerHTML = rows.length ? rows.map(r => {
+        const sourcesTxt = r.event.links.filter(l => l.role === 'INPUT').map(l => `#${l.batch_id} (${fmtQty(l.quantity)})`).join(', ');
+        return `<tr>
+            <td>${r.event.event_date}</td>
+            <td>${sourcesTxt || '–'}</td>
+            <td>${r.shipment.shipping_number || '–'}</td>
+            <td>${r.shipment.recipient || r.shipment.destination || '–'}</td>
+            <td>${fmtQty(r.shipment.net_weight)}</td>
+            <td>${fmtQty(r.shipment.tare_weight)}</td>
+            <td>${picName(r.event.pic_user_id)}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Belum ada data Delivery</td></tr>';
+}
+
+async function renderSampleDeliveryHistory() {
+    const rows = await api('GET', '/deliveries?event_type=SAMPLE_DELIVERY');
+    document.getElementById('sampleDeliveryTable').innerHTML = rows.length ? rows.map(r => {
+        const sourcesTxt = r.event.links.filter(l => l.role === 'INPUT').map(l => `#${l.batch_id} (${fmtQty(l.quantity)})`).join(', ');
+        const notes = r.event.notes ? safeParse(r.event.notes) : {};
+        return `<tr>
+            <td>${r.event.event_date}</td>
+            <td>${sourcesTxt || '–'}</td>
+            <td>${r.shipment.shipping_number || '–'}</td>
+            <td>${notes.description || '–'}</td>
+            <td>${fmtQty(r.shipment.net_weight)}</td>
+            <td>${picName(r.event.pic_user_id)}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">Belum ada data Sample Delivery</td></tr>';
+}
+
+// ─── ADJUSTMENT (stock opname, gated PRODUCTION_MANAGER) + manual
+// REJECTED/SUPERSEDED marking -- services/adjustment.py. None of the three
+// go through record_process_event()/the genealogy graph (GENEALOGY.md
+// §3.2/§5.2) -- server is the sole enforcer of the role gate on Adjustment,
+// this form never filters the PIC dropdown by role (see routers/adjustment.py
+// module docstring). ─────────────────────────────────────────────────────
+function updateAdjustmentCurrentQty() {
+    const el = document.getElementById('ajCurrentQty');
+    if (!el) return;
+    const batchId = Number(document.getElementById('ajBatch').value);
+    const batch = batches.find(b => b.batch_id === batchId);
+    el.textContent = batch ? `Qty saat ini: ${fmtQty(batch.current_quantity)} ${batch.unit}` : 'Qty saat ini: –';
+}
+document.getElementById('ajBatch').addEventListener('change', updateAdjustmentCurrentQty);
+document.getElementById('ajTanggal').value = todayStr();
+
+document.getElementById('adjustmentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const batchId = document.getElementById('ajBatch').value;
+    const picId = document.getElementById('ajPic').value;
+    const newQty = document.getElementById('ajNewQty').value;
+    const notes = document.getElementById('ajNotes').value.trim();
+    if (!batchId || !picId) { toast('Batch dan PIC harus dipilih.', 'error'); return; }
+    if (newQty === '' || Number(newQty) < 0) { toast('Qty baru harus diisi (boleh 0).', 'error'); return; }
+    if (!notes) { toast('Alasan/catatan wajib diisi.', 'error'); return; }
+    try {
+        await api('POST', '/adjustment', {
+            event_date: document.getElementById('ajTanggal').value,
+            batch_id: Number(batchId),
+            new_quantity: newQty,
+            actor_user_id: Number(picId),
+            notes,
+        });
+        toast('✅ Adjustment tersimpan.', 'success');
+        document.getElementById('adjustmentForm').reset();
+        document.getElementById('ajTanggal').value = todayStr();
+        await refreshBatches();
+        await renderAuditLog();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+document.getElementById('rejectForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const batchId = document.getElementById('rjBatch').value;
+    const picId = document.getElementById('rjPic').value;
+    const reason = document.getElementById('rjReason').value.trim();
+    if (!batchId || !picId || !reason) { toast('Batch, PIC, dan alasan harus diisi.', 'error'); return; }
+    try {
+        await api('POST', `/batches/${batchId}/reject`, { actor_user_id: Number(picId), reason });
+        toast(`✅ Batch #${batchId} ditandai REJECTED.`, 'success');
+        document.getElementById('rejectForm').reset();
+        await refreshBatches();
+        await renderAuditLog();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+document.getElementById('supersedeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const batchId = document.getElementById('ssBatch').value;
+    const picId = document.getElementById('ssPic').value;
+    const reason = document.getElementById('ssReason').value.trim();
+    if (!batchId || !picId || !reason) { toast('Batch, PIC, dan alasan harus diisi.', 'error'); return; }
+    try {
+        await api('POST', `/batches/${batchId}/supersede`, { actor_user_id: Number(picId), reason });
+        toast(`✅ Batch #${batchId} ditandai SUPERSEDED.`, 'success');
+        document.getElementById('supersedeForm').reset();
+        await refreshBatches();
+        await renderAuditLog();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
+async function renderAuditLog() {
+    const logs = await api('GET', '/audit-logs?entity_type=Batch');
+    document.getElementById('auditLogTable').innerHTML = logs.length ? logs.slice(0, 30).map(l => `
+        <tr>
+            <td>${new Date(l.timestamp).toLocaleString('id-ID')}</td>
+            <td class="batch-id">#${l.entity_id}</td>
+            <td><span class="badge badge-primary">${l.action}</span></td>
+            <td>${l.before_value ?? '–'}</td>
+            <td>${l.after_value ?? '–'}</td>
+            <td>${picName(l.actor_user_id)}</td>
+        </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">Belum ada audit log</td></tr>';
+}
+
 // ─── BATCH LIST ─────────────────────────────────────────────────────────
 async function renderBatchList() {
     const status = document.getElementById('blStatus').value;
@@ -1046,6 +1385,8 @@ async function boot() {
         initMixSources();
         initVacLines();
         initPkSources();
+        initDSources();
+        initSdSources();
         await loadMasterData();
         await refreshBatches();
         await renderDashboard();

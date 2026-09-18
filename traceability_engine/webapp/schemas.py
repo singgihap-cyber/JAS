@@ -47,6 +47,16 @@ class UserOut(BaseModel):
     role: str
 
 
+class CustomerCreate(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+class CustomerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    customer_id: int
+    name: str
+
+
 # --------------------------------------------------------------------- batch
 class BatchOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -370,6 +380,52 @@ class PackingResult(BaseModel):
     batch: BatchOut  # single new PACKAGED batch -- ONE-or-MANY->ONE
 
 
+# ------------------------------------------------------------------ delivery (12)
+class ShipmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    shipment_id: int
+    event_id: int
+    shipping_number: Optional[str] = None
+    destination: Optional[str] = None
+    expedition: Optional[str] = None
+    transport_condition: Optional[str] = None
+    packaging_condition: Optional[str] = None
+    coly: Optional[int] = None
+    gross_weight: Optional[Decimal] = None
+    tare_weight: Optional[Decimal] = None
+    net_weight: Optional[Decimal] = None
+    customer_id: Optional[int] = None
+    recipient: Optional[str] = None
+
+
+class DeliverySourceCreate(BaseModel):
+    batch_id: int
+    quantity: Decimal  # PD/SmpD "NETTO" contribution for this batch -- required per source, delivery.py #3/#4
+
+
+class DeliveryCreate(BaseModel):
+    event_date: dt.date  # PD/SmpD "TANGGAL"
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    sources: list[DeliverySourceCreate] = Field(..., min_length=1)  # delivery.py #4
+    gross_weight: Decimal  # PD/SmpD "BRUTO" -- required, net/tare derived server-side, delivery.py #3
+    unit: str = "kg"
+    shipping_number: Optional[str] = None  # PD/SmpD "NOMOR PENGIRIMAN" -- reused from Packing, #1
+    destination: Optional[str] = None  # PD "LOKASI" / SmpD "ALAMAT" -- #2
+    recipient: Optional[str] = None  # PD "PERUSAHAAN" / SmpD "NAMA" -- #2
+    customer_id: Optional[int] = None  # optional FK, no matching performed here -- #7
+    expedition: Optional[str] = None  # "JENIS EKSPEDISI"
+    transport_condition: Optional[str] = None  # "KONDISI ANGKUT"
+    packaging_condition: Optional[str] = None  # "KONDISI KEMASAN"
+    coly: Optional[int] = None  # "QTY BOX (COLY)"
+    description: Optional[str] = None  # SmpD "DESKRIPSI VANILA" -- notes only, #6
+
+
+class DeliveryResult(BaseModel):
+    event: ProcessEventOut  # NO_OUTPUT_EVENT_TYPES -- no output batch, delivery.py module docstring
+    shipment: ShipmentOut
+
+
 # ----------------------------------------------------------------- stock (13)
 class StockTransactionOut(BaseModel):
     transaction_id: int
@@ -447,6 +503,38 @@ class ChainOfCustodyOut(BaseModel):
     downstream_events: list[TraceEventSummaryOut] = []
     shipments: list[TraceShipmentOut] = []
     incomplete_leaves: list[TraceBatchSummaryOut] = []
+
+
+# ---------------------------------------------------------------- adjustment
+class AdjustmentCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    batch_id: int
+    new_quantity: Decimal  # corrected on-hand qty -- server computes the delta, never accepted here
+    actor_user_id: int  # must be role PRODUCTION_MANAGER -- enforced server-side, adjustment.py
+    notes: str = Field(..., min_length=1)  # mandatory reason, adjustment.py
+
+
+class RejectCreate(BaseModel):
+    actor_user_id: int
+    reason: str = Field(..., min_length=1)
+
+
+class SupersedeCreate(BaseModel):
+    actor_user_id: int
+    reason: str = Field(..., min_length=1)
+
+
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    audit_id: int
+    entity_type: str
+    entity_id: int
+    action: str
+    actor_user_id: int
+    timestamp: dt.datetime
+    before_value: Optional[str] = None
+    after_value: Optional[str] = None
 
 
 # ------------------------------------------------------------------- errors

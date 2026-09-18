@@ -65,6 +65,13 @@ def pic_id(client):
     return r.json()["user_id"]
 
 
+@pytest.fixture()
+def pm_id(client):
+    r = client.post("/api/users", json={"name": "Robiah", "role": "PRODUCTION_MANAGER"})
+    assert r.status_code == 201
+    return r.json()["user_id"]
+
+
 def test_master_data_roundtrip(client, supplier_id, pic_id):
     suppliers = client.get("/api/suppliers").json()
     users = client.get("/api/users").json()
@@ -1038,3 +1045,312 @@ def test_batch_trace_covers_split_genealogy_downstream(client, supplier_id, pic_
 def test_batch_trace_404_for_unknown_batch(client):
     r = client.get("/api/batches/99999/trace")
     assert r.status_code == 404
+
+
+# --------------------------------------------------------- delivery (Fase 15 slice 5)
+# The event/shipment mechanics themselves (net/tare derivation, SHIPPED
+# promotion, is_sample tagging, multi-source, customer_id passthrough) are
+# already covered end-to-end at the service layer in test_delivery.py --
+# these confirm GET/POST /delivery, /sample-delivery, /customers wiring
+# through HTTP (request parsing, response shaping incl. the Shipment
+# satellite, 404s) works, same split of responsibility as every other
+# stage's webapp-vs-service test pair in this suite.
+def test_customers_roundtrip(client):
+    r = client.post("/api/customers", json={"name": "LIBERTA GELATO"})
+    assert r.status_code == 201, r.text
+    customer_id = r.json()["customer_id"]
+    customers = client.get("/api/customers").json()
+    assert any(c["customer_id"] == customer_id and c["name"] == "LIBERTA GELATO" for c in customers)
+
+
+def test_delivery_full_depletion_returns_shipment_and_ships_batch(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "2.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    customer_id = client.post("/api/customers", json={"name": "LIBERTA GELATO"}).json()["customer_id"]
+
+    r = client.post(
+        "/api/delivery",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": batch_id, "quantity": "2.000"}],
+            "gross_weight": "2.275",
+            "shipping_number": "DN/G/260120-001",
+            "destination": "Tangerang",
+            "recipient": "LIBERTA GELATO",
+            "customer_id": customer_id,
+            "coly": 1,
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event"]["event_type"] == "DELIVERY"
+    assert body["event"]["links"] == [
+        {"batch_id": batch_id, "role": "INPUT", "quantity": "2.000", "unit": "kg"}
+    ]
+    shipment = body["shipment"]
+    assert shipment["net_weight"] == "2.000"  # derived: SUM(sources) -- delivery.py #3
+    assert shipment["tare_weight"] == "0.275"  # derived: gross - net -- delivery.py #3
+    assert shipment["customer_id"] == customer_id
+    assert shipment["recipient"] == "LIBERTA GELATO"
+
+    shipped = client.get(f"/api/batches/{batch_id}").json()
+    assert shipped["status"] == "SHIPPED"  # not CONSUMED -- delivery.py #8
+
+
+def test_sample_delivery_is_tagged_is_sample_over_http(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "1.400",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/sample-delivery",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": batch_id, "quantity": "1.400"}],
+            "gross_weight": "1.505",
+            "description": "EP",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["event"]["event_type"] == "SAMPLE_DELIVERY"
+
+    txns = client.get(f"/api/batches/{batch_id}/transactions").json()
+    assert any(t["is_sample"] is True for t in txns)
+
+
+def test_list_deliveries_joins_shipment_for_both_event_types(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "5.000",
+        },
+    )
+    b1 = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "1.000",
+        },
+    )
+    b2 = r.json()["batch"]["batch_id"]
+
+    client.post(
+        "/api/delivery",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": b1, "quantity": "5.000"}],
+            "gross_weight": "5.200",
+            "shipping_number": "DN/1",
+        },
+    )
+    client.post(
+        "/api/sample-delivery",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": b2, "quantity": "1.000"}],
+            "gross_weight": "1.100",
+            "shipping_number": "SMP/1",
+        },
+    )
+
+    both = client.get("/api/deliveries").json()
+    assert len(both) == 2
+    assert {d["event"]["event_type"] for d in both} == {"DELIVERY", "SAMPLE_DELIVERY"}
+    assert {d["shipment"]["shipping_number"] for d in both} == {"DN/1", "SMP/1"}
+
+    only_samples = client.get("/api/deliveries?event_type=SAMPLE_DELIVERY").json()
+    assert len(only_samples) == 1
+    assert only_samples[0]["shipment"]["shipping_number"] == "SMP/1"
+
+
+def test_delivery_insufficient_stock_is_409_over_http(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "1.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/delivery",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": batch_id, "quantity": "5.000"}],
+            "gross_weight": "5.000",
+        },
+    )
+    assert r.status_code == 409
+
+
+# ------------------------------------------------------- adjustment (Fase 15 slice 5)
+# Same split as delivery above -- role-gating, mandatory-reason, audit-log
+# writing, and REJECTED/SUPERSEDED status transitions are already covered
+# at the service layer in test_adjustment.py. These confirm the HTTP layer
+# (403/422/404 mapping, response shaping, the new generic /audit-logs
+# report endpoint) works end-to-end.
+def test_non_production_manager_adjustment_is_403_over_http(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/adjustment",
+        json={
+            "event_date": "2026-09-18",
+            "batch_id": batch_id,
+            "new_quantity": "90.000",
+            "actor_user_id": pic_id,  # STAFF, not PRODUCTION_MANAGER
+            "notes": "stok opname bulanan",
+        },
+    )
+    assert r.status_code == 403
+
+
+def test_production_manager_adjustment_updates_batch_and_writes_audit_log(
+    client, supplier_id, pic_id, pm_id
+):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/adjustment",
+        json={
+            "event_date": "2026-09-18",
+            "batch_id": batch_id,
+            "new_quantity": "92.500",
+            "actor_user_id": pm_id,
+            "notes": "Selisih stok opname fisik gudang",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["event_type"] == "ADJUSTMENT"
+
+    updated = client.get(f"/api/batches/{batch_id}").json()
+    assert updated["current_quantity"] == "92.500"
+
+    logs = client.get(f"/api/audit-logs?entity_type=Batch&entity_id={batch_id}").json()
+    assert any(l["action"] == "ADJUSTMENT_APPROVED" for l in logs)
+
+
+def test_adjustment_without_reason_is_422_over_http(client, supplier_id, pic_id, pm_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/adjustment",
+        json={
+            "event_date": "2026-09-18",
+            "batch_id": batch_id,
+            "new_quantity": "90.000",
+            "actor_user_id": pm_id,
+            "notes": "   ",
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_reject_batch_over_http_updates_status_and_audit_log(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(f"/api/batches/{batch_id}/reject", json={"actor_user_id": pic_id, "reason": "AW terlalu tinggi"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "REJECTED"
+
+    logs = client.get(f"/api/audit-logs?entity_type=Batch&entity_id={batch_id}").json()
+    assert any(l["action"] == "REJECTED" and "AW terlalu tinggi" in (l["after_value"] or "") for l in logs)
+
+
+def test_supersede_batch_over_http_updates_status(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        f"/api/batches/{batch_id}/supersede", json={"actor_user_id": pic_id, "reason": "Downgrade via Sortasi"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "SUPERSEDED"
+
+
+def test_reject_and_supersede_404_for_unknown_batch(client, pic_id):
+    r1 = client.post("/api/batches/99999/reject", json={"actor_user_id": pic_id, "reason": "x"})
+    r2 = client.post("/api/batches/99999/supersede", json={"actor_user_id": pic_id, "reason": "x"})
+    assert r1.status_code == 404
+    assert r2.status_code == 404

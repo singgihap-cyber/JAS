@@ -9,15 +9,17 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Batch, EventBatchLink, ProcessEvent, QualityTest, StockTransaction, Supplier
+from ..models import AuditLog, Batch, EventBatchLink, ProcessEvent, QualityTest, Shipment, StockTransaction, Supplier
 from ..services.stock import BatchBalance, StockSummaryRow
 from .schemas import (
+    AuditLogOut,
     BatchBalanceOut,
     BatchDetailOut,
     BatchOut,
     EventBatchLinkOut,
     ProcessEventOut,
     QualityTestOut,
+    ShipmentOut,
     StockSummaryRowOut,
     StockTransactionOut,
 )
@@ -138,6 +140,39 @@ def batch_balance_to_out(balance: BatchBalance) -> BatchBalanceOut:
         cached_quantity=balance.cached_quantity,
         ledger_quantity=balance.ledger_quantity,
         matches=balance.matches,
+    )
+
+
+# ------------------------------------------------------------------- delivery (12)
+def shipment_to_out(shipment: Shipment) -> ShipmentOut:
+    return ShipmentOut(
+        shipment_id=shipment.shipment_id,
+        event_id=shipment.event_id,
+        shipping_number=shipment.shipping_number,
+        destination=shipment.destination,
+        expedition=shipment.expedition,
+        transport_condition=shipment.transport_condition,
+        packaging_condition=shipment.packaging_condition,
+        coly=shipment.coly,
+        gross_weight=shipment.gross_weight,
+        tare_weight=shipment.tare_weight,
+        net_weight=shipment.net_weight,
+        customer_id=shipment.customer_id,
+        recipient=shipment.recipient,
+    )
+
+
+# ----------------------------------------------------------------- adjustment
+def audit_log_to_out(log: AuditLog) -> AuditLogOut:
+    return AuditLogOut(
+        audit_id=log.audit_id,
+        entity_type=log.entity_type,
+        entity_id=log.entity_id,
+        action=log.action.value,
+        actor_user_id=log.actor_user_id,
+        timestamp=log.timestamp,
+        before_value=log.before_value,
+        after_value=log.after_value,
     )
 
 
