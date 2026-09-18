@@ -214,6 +214,71 @@ class SundryingCreate(BaseModel):
     drying_duration: Optional[str] = None
 
 
+# ------------------------------- curing / airdrying (Hijau route, Fase 19 engine / Fase 20 UI)
+# Same field shape for all five (services/curing.py CuringStageInput, one
+# shared dataclass) -- five separate schema classes anyway, one per
+# EventType/business concept, matching the Magnetization/MDPowder
+# convention (routers/powder.py) rather than a single reused class.
+class MainCuringCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    final_quantity: Decimal
+    starting_quantity: Optional[Decimal] = None
+    unit: str = "kg"
+    duration: Optional[str] = None  # free text, unit varies -- curing.py #4 [UNCONFIRMED]
+    condition_notes: Optional[str] = None  # curing.py #5 [UNCONFIRMED]
+
+
+class FirstCuringCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    final_quantity: Decimal
+    starting_quantity: Optional[Decimal] = None
+    unit: str = "kg"
+    duration: Optional[str] = None
+    condition_notes: Optional[str] = None
+
+
+class SecondCuringCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    final_quantity: Decimal
+    starting_quantity: Optional[Decimal] = None
+    unit: str = "kg"
+    duration: Optional[str] = None
+    condition_notes: Optional[str] = None
+
+
+class ThirdCuringCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    final_quantity: Decimal
+    starting_quantity: Optional[Decimal] = None
+    unit: str = "kg"
+    duration: Optional[str] = None
+    condition_notes: Optional[str] = None
+
+
+class AirdryingCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    final_quantity: Decimal
+    starting_quantity: Optional[Decimal] = None
+    unit: str = "kg"
+    duration: Optional[str] = None
+    condition_notes: Optional[str] = None
+
+
 # ------------------------------------------------------------------ sortation
 class SortationCreate(BaseModel):
     event_date: dt.date  # SORT "start date"

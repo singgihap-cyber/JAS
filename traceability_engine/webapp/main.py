@@ -28,6 +28,7 @@ from .database import init_db
 from .routers import (
     adjustment,
     batches,
+    curing,
     delivery,
     master_data,
     mixing,
@@ -98,6 +99,7 @@ app.include_router(master_data.router, prefix=api_prefix)
 app.include_router(receiving.router, prefix=api_prefix)
 app.include_router(qc_md.router, prefix=api_prefix)
 app.include_router(steam_dry.router, prefix=api_prefix)
+app.include_router(curing.router, prefix=api_prefix)
 app.include_router(sortation.router, prefix=api_prefix)
 app.include_router(mixing.router, prefix=api_prefix)
 app.include_router(powder.router, prefix=api_prefix)

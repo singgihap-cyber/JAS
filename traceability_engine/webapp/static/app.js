@@ -311,6 +311,64 @@ const STAGE_DEFS = [
         ],
         historyCols: ['final_quantity', 'shrinkage_qty', 'drying_duration'],
     },
+    // Hijau route only: Main/1st/2nd/3rd Curing, Airdrying (Fase 19 engine,
+    // services/curing.py). No source document defines field-level detail
+    // for these five stages -- fields are modeled on Sundrying's
+    // starting/final-quantity-with-derived-shrinkage shape and marked
+    // [UNCONFIRMED] (curing.py module docstring #2-5), same as the router
+    // schemas (webapp/schemas.py). Steaming/blanching and the later
+    // Sundrying step in this route reuse the existing 'steaming'/'sundrying'
+    // stage entries above unchanged (curing.py #1) -- not repeated here.
+    {
+        key: 'main_curing', label: '🫙 Main Curing (Hijau)', endpoint: '/main-curing',
+        fields: [
+            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
+            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
+            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+        ],
+        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+    },
+    {
+        key: 'first_curing', label: '🫙 1st Curing (Hijau)', endpoint: '/first-curing',
+        fields: [
+            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
+            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
+            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+        ],
+        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+    },
+    {
+        key: 'second_curing', label: '🫙 2nd Curing (Hijau)', endpoint: '/second-curing',
+        fields: [
+            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
+            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
+            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+        ],
+        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+    },
+    {
+        key: 'third_curing', label: '🫙 3rd Curing (Hijau)', endpoint: '/third-curing',
+        fields: [
+            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
+            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
+            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+        ],
+        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+    },
+    {
+        key: 'airdrying', label: '🌬️ Airdrying (Hijau)', endpoint: '/airdrying',
+        fields: [
+            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
+            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
+            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+        ],
+        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+    },
     {
         key: 'sortation', label: '🧺 Sortasi', endpoint: '/sortation',
         fields: [
@@ -434,6 +492,8 @@ async function renderProsesHistory() {
     document.getElementById('prosesRiwayatTitle').textContent = `📊 Riwayat ${def.label}`;
     const eventTypeMap = {
         qc_test: 'QC_TEST', metal_detection: 'METAL_DETECTION', steaming: 'STEAMING', sundrying: 'SUNDRYING',
+        main_curing: 'MAIN_CURING', first_curing: 'FIRST_CURING', second_curing: 'SECOND_CURING',
+        third_curing: 'THIRD_CURING', airdrying: 'AIRDRYING',
         sortation: 'SORTATION', grinding: 'GRINDING', magnetization: 'MAGNETIZATION', md_powder: 'MD_POWDER',
         rework: 'REWORK',
     };

@@ -1354,3 +1354,162 @@ def test_reject_and_supersede_404_for_unknown_batch(client, pic_id):
     r2 = client.post("/api/batches/99999/supersede", json={"actor_user_id": pic_id, "reason": "x"})
     assert r1.status_code == 404
     assert r2.status_code == 404
+
+
+# --------------------------------------------------------- Fase 20: Hijau curing/airdrying UI
+# API-level tests for the five endpoints added over the Fase 19 engine
+# (services/curing.py) -- routers/curing.py, schemas MainCuringCreate/
+# FirstCuringCreate/SecondCuringCreate/ThirdCuringCreate/AirdryingCreate.
+# Mirrors test_full_chain_receiving_qc_md_steam_dry's shape: exercise the
+# real HTTP layer (request parsing, shrinkage derivation surfaced in the
+# response, event-type filtering), not the service functions directly --
+# those already have unit coverage in tests/test_curing.py.
+
+HIJAU_CURING_ENDPOINTS = [
+    ("/api/main-curing", "MAIN_CURING"),
+    ("/api/first-curing", "FIRST_CURING"),
+    ("/api/second-curing", "SECOND_CURING"),
+    ("/api/third-curing", "THIRD_CURING"),
+    ("/api/airdrying", "AIRDRYING"),
+]
+
+
+@pytest.mark.parametrize("endpoint,event_type", HIJAU_CURING_ENDPOINTS)
+def test_hijau_curing_stage_derives_shrinkage_over_http(client, supplier_id, pic_id, endpoint, event_type):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_HIJAU",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        endpoint,
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "final_quantity": "92.500",
+            "duration": "5 hari",
+            "condition_notes": "Dibungkus karung goni",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["event_type"] == event_type
+    # Shrinkage must come back derived from the engine (starting on-hand
+    # qty, since starting_quantity was omitted -- CuringStageInput default),
+    # never computed/sent by the caller.
+    assert body["shrinkage_qty"] == "7.500"
+
+    history = client.get("/api/process-events", params={"batch_id": batch_id, "event_type": event_type})
+    assert history.status_code == 200
+    assert len(history.json()) == 1
+
+
+@pytest.mark.parametrize("endpoint,event_type", HIJAU_CURING_ENDPOINTS)
+def test_hijau_curing_stage_on_missing_batch_is_422_not_500(client, pic_id, endpoint, event_type):
+    r = client.post(
+        endpoint,
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": 999999,
+            "final_quantity": "10.000",
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_input"
+
+
+def test_hijau_curing_full_chain_reuses_steaming_and_sundrying(client, supplier_id, pic_id):
+    """curing.py module docstring #1: Steaming/blanching and Sundrying on
+    the Hijau route are NOT new event types -- they reuse EventType.STEAMING
+    / EventType.SUNDRYING unchanged. This drives the full Hijau chain
+    (Steaming -> Main -> 1st -> 2nd -> 3rd Curing -> Sundrying -> Airdrying)
+    through the HTTP layer and checks the batch's event history reflects
+    all seven stages with a monotonically shrinking on-hand quantity."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_HIJAU",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    steam = client.post(
+        "/api/steaming",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "steam_temperature": "62.0",
+        },
+    )
+    assert steam.status_code == 201, steam.text
+
+    for endpoint, final_qty in [
+        ("/api/main-curing", "95.000"),
+        ("/api/first-curing", "90.000"),
+        ("/api/second-curing", "85.000"),
+        ("/api/third-curing", "80.000"),
+    ]:
+        r = client.post(
+            endpoint,
+            json={
+                "event_date": "2026-09-18",
+                "pic_user_id": pic_id,
+                "batch_id": batch_id,
+                "final_quantity": final_qty,
+            },
+        )
+        assert r.status_code == 201, r.text
+
+    dry = client.post(
+        "/api/sundrying",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "final_quantity": "70.000",
+            "drying_duration": "14 hari",
+        },
+    )
+    assert dry.status_code == 201, dry.text
+
+    air = client.post(
+        "/api/airdrying",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "final_quantity": "65.000",
+        },
+    )
+    assert air.status_code == 201, air.text
+    assert air.json()["shrinkage_qty"] == "5.000"
+
+    detail = client.get(f"/api/batches/{batch_id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["current_quantity"] == "65.000"
+    event_types = [e["event_type"] for e in body["events"]]
+    assert event_types == [
+        "RECEIVING",
+        "STEAMING",
+        "MAIN_CURING",
+        "FIRST_CURING",
+        "SECOND_CURING",
+        "THIRD_CURING",
+        "SUNDRYING",
+        "AIRDRYING",
+    ]
