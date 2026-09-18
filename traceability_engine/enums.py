@@ -31,6 +31,20 @@ class EventType(str, enum.Enum):
     METAL_DETECTION = "METAL_DETECTION"
     STEAMING = "STEAMING"
     SUNDRYING = "SUNDRYING"
+    # Fase 19 -- Hijau (green-curing) route only, WORKFLOW.md/CLAUDE.md:
+    # PB -> Sortation -> Steaming/blanching -> Main Curing -> 1st Curing ->
+    # 2nd Curing -> 3rd Curing -> Sundrying -> Airdrying -> Sortation -> ...
+    # Steaming/blanching and the later Sundrying reuse STEAMING/SUNDRYING
+    # above rather than getting their own types -- see services/curing.py
+    # module docstring #1 for why (traceability-trial(1).html STAGE_DEFS
+    # confirms both are the same stage definition across both routes, only
+    # the byAlur hint text differs). These five are the genuinely new
+    # stages with no Kering equivalent.
+    MAIN_CURING = "MAIN_CURING"
+    FIRST_CURING = "FIRST_CURING"
+    SECOND_CURING = "SECOND_CURING"
+    THIRD_CURING = "THIRD_CURING"
+    AIRDRYING = "AIRDRYING"
     SORTATION = "SORTATION"
     MIXING = "MIXING"
     VACUUM = "VACUUM"
