@@ -370,6 +370,85 @@ class PackingResult(BaseModel):
     batch: BatchOut  # single new PACKAGED batch -- ONE-or-MANY->ONE
 
 
+# ----------------------------------------------------------------- stock (13)
+class StockTransactionOut(BaseModel):
+    transaction_id: int
+    batch_id: int
+    event_id: int
+    direction: str
+    quantity: Decimal
+    balance_after: Decimal
+    is_sample: bool
+    created_at: dt.datetime
+
+
+class BatchBalanceOut(BaseModel):
+    batch_id: int
+    status: str
+    cached_quantity: Decimal
+    ledger_quantity: Decimal
+    matches: bool  # False here is a real book discrepancy, never expected in normal operation -- stock.py module docstring
+
+
+class StockSummaryRowOut(BaseModel):
+    supplier_id: Optional[int] = None
+    supplier_code: Optional[str] = None
+    supplier_name: Optional[str] = None
+    jenis_code: Optional[str] = None
+    grade_code: Optional[str] = None
+    batch_count: int
+    total_quantity: Decimal
+
+
+class StockTotalOut(BaseModel):
+    total_quantity: Decimal  # ACTIVE batches only -- stock.py module docstring
+
+
+# ----------------------------------------------------------- traceability (14)
+class TraceBatchSummaryOut(BaseModel):
+    batch_id: int
+    batch_number: Optional[str] = None
+    status: str
+    current_quantity: Decimal
+
+
+class TraceSupplierOut(BaseModel):
+    supplier_id: int
+    supplier_code: str
+    name: str
+
+
+class TraceShipmentOut(BaseModel):
+    shipment_id: int
+    shipping_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    recipient: Optional[str] = None
+    destination: Optional[str] = None
+
+
+class TraceEventSummaryOut(BaseModel):
+    event_id: int
+    event_type: str
+    event_date: dt.date
+    pic: Optional[str] = None
+    notes: Optional[str] = None
+    total_input_quantity: Optional[Decimal] = None
+    total_output_quantity: Optional[Decimal] = None
+
+
+class ChainOfCustodyOut(BaseModel):
+    """Mirrors services/traceability.py's `chain_of_custody_report()` dict
+    shape field-for-field -- no new report logic at this layer, only a
+    typed response contract over what the engine already assembled."""
+
+    batch: TraceBatchSummaryOut
+    suppliers: list[TraceSupplierOut] = []
+    upstream_events: list[TraceEventSummaryOut] = []
+    downstream_events: list[TraceEventSummaryOut] = []
+    shipments: list[TraceShipmentOut] = []
+    incomplete_leaves: list[TraceBatchSummaryOut] = []
+
+
 # ------------------------------------------------------------------- errors
 class ErrorOut(BaseModel):
     error: str

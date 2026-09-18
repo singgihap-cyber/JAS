@@ -8,7 +8,7 @@
 </head>
 <body>
 <div class="sidebar">
-    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 3</small></div>
+    <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 4</small></div>
     <div class="nav">
         <button class="nav-item active" data-page="dashboard">📊 Dashboard</button>
         <button class="nav-item" data-page="batch-input">📥 Penerimaan Barang</button>
@@ -17,6 +17,7 @@
         <button class="nav-item" data-page="vacuum-packing">🧴 Vacuum &amp; Packing</button>
         <button class="nav-item" data-page="batch-list">📋 Daftar Batch</button>
         <button class="nav-item" data-page="batch-history">🔍 Batch History</button>
+        <button class="nav-item" data-page="stock">📦 Stock Monitoring</button>
         <button class="nav-item" data-page="suppliers">🏭 Data Supplier</button>
         <button class="nav-item" data-page="users">👥 User Management</button>
     </div>
@@ -34,11 +35,12 @@
             <div class="section">
                 <div class="section-title">📈 Ringkasan Batch Aktif</div>
                 <div class="info-box">
-                    Slice 1+2+3 Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming, Sundrying,
+                    Slice 1+2+3+4 Fase 15: <strong>Penerimaan Barang, QC Test, Metal Detection, Steaming, Sundrying,
                     Sortasi, Mixing, Grinding &amp; Sieving, Magnetization, Metal Detection Powder, Rework,
-                    Vacuum, Packing</strong> sudah tersambung penuh ke engine (9 dari 12 modul). Tahap lain
-                    (Delivery, Stock, Traceability, Adjustment) menyusul di sesi berikutnya — struktur
-                    router/halaman ini memang dirancang supaya tahap baru cukup ditambahkan, bukan dibangun ulang.
+                    Vacuum, Packing, Stock Monitoring, Batch History (chain-of-custody)</strong> sudah tersambung
+                    penuh ke engine (10 dari 12 modul). Tahap lain (Delivery + Sample Delivery, Adjustment)
+                    menyusul di sesi berikutnya — struktur router/halaman ini memang dirancang supaya tahap baru
+                    cukup ditambahkan, bukan dibangun ulang.
                 </div>
                 <div class="table-container">
                     <table>
@@ -526,6 +528,49 @@
                 <div id="historyDetails" style="margin-top:10px">
                     <p style="color:var(--text-secondary)">Masukkan Batch ID untuk melihat riwayat lengkapnya.</p>
                 </div>
+                <div id="historyTrace" style="margin-top:10px"></div>
+            </div>
+        </div>
+
+        <!-- STOCK MONITORING -->
+        <div class="page" id="stock">
+            <div class="section">
+                <div class="section-title">📦 Ringkasan Stok (per Supplier / Jenis / Grade)</div>
+                <div class="info-box">
+                    Laporan murni atas ledger <code>StockTransaction</code> yang sudah otomatis tercatat sejak
+                    Fase 3 (services/stock.py) — halaman ini tidak mencatat event baru, hanya membaca. Hanya
+                    batch berstatus <strong>ACTIVE</strong> yang dihitung sebagai stok on-hand.
+                </div>
+                <div style="margin-bottom:10px">Total Stok On-Hand: <strong id="stockTotal">–</strong></div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Supplier</th><th>Jenis</th><th>Grade</th><th>Jumlah Batch</th><th>Total Qty</th></tr></thead>
+                        <tbody id="stockSummaryTable"><tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">Memuat...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="section">
+                <div class="section-title">🔎 Reconciliation Sweep</div>
+                <div class="info-box">
+                    Membandingkan cache <code>current_quantity</code> tiap batch dengan saldo hasil hitung ulang
+                    dari ledger <code>StockTransaction</code>. Daftar kosong = seluruh pembukuan cocok (kondisi
+                    normal — 13_STOCK.md: "do not manually overwrite current stock").
+                </div>
+                <button class="btn btn-secondary btn-small" onclick="runStockReconciliation()">Jalankan Reconciliation</button>
+                <div id="reconcileResult" style="margin-top:10px"></div>
+            </div>
+            <div class="section">
+                <div class="section-title">📜 Riwayat Transaksi per Batch</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Batch ID</label>
+                        <input type="number" class="form-input" id="stockBatchSearch" placeholder="Masukkan Batch ID...">
+                    </div>
+                    <div class="form-group" style="align-self:end">
+                        <button class="btn btn-primary" onclick="findBatchStock()">Cari</button>
+                    </div>
+                </div>
+                <div id="stockBatchResult" style="margin-top:10px"></div>
             </div>
         </div>
 

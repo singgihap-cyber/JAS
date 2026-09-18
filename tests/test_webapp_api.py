@@ -847,3 +847,194 @@ def test_packing_rejects_duplicate_source_batch_id(client, supplier_id, pic_id):
     )
     assert r.status_code == 422
     assert r.json()["error"] == "invalid_input"
+
+
+# ------------------------------------------------------------- stock (Fase 15 slice 4)
+# Reconciliation-mismatch detection and the full grouping/exclusion rules
+# already have dedicated service-level coverage in test_stock.py -- these
+# only confirm the HTTP wiring (routing, session injection, response
+# shaping, 404s) the same way the rest of this file does for every other
+# router.
+def test_stock_summary_and_total_after_receiving(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "250.000",
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    summary = client.get("/api/stock/summary").json()
+    assert len(summary) == 1
+    row = summary[0]
+    assert row["supplier_id"] == supplier_id
+    assert row["supplier_code"] == "024"
+    assert row["supplier_name"] == "WARDOYO"
+    assert row["batch_count"] == 1
+    assert row["total_quantity"] == "250.000"
+
+    total = client.get("/api/stock/total").json()
+    assert total["total_quantity"] == "250.000"
+
+
+def test_stock_summary_excludes_consumed_batches(client, supplier_id, pic_id):
+    """Only BatchStatus.ACTIVE counts as on-hand stock (stock.py module
+    docstring) -- once a batch is fully consumed (Packing here), it must
+    drop out of /stock/summary and /stock/total."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/packing",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "sources": [{"batch_id": batch_id, "quantity": "100.000"}],
+            "gross_weight": "105.000",
+        },
+    )
+    assert r.status_code == 201, r.text
+    packed_id = r.json()["batch"]["batch_id"]
+
+    summary = client.get("/api/stock/summary").json()
+    assert len(summary) == 1  # only the new PACKAGED batch, not the CONSUMED source
+    assert summary[0]["batch_count"] == 1
+    total = client.get("/api/stock/total").json()
+    assert total["total_quantity"] == "100.000"  # packed batch's net weight only
+
+    consumed = client.get(f"/api/batches/{batch_id}/stock").json()
+    assert consumed["status"] == "CONSUMED"
+    assert consumed["cached_quantity"] == "0.000"
+
+    active = client.get(f"/api/batches/{packed_id}/stock").json()
+    assert active["status"] == "ACTIVE"
+    assert active["matches"] is True
+
+
+def test_stock_reconcile_is_empty_in_normal_operation(client, supplier_id, pic_id):
+    client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "10.000",
+        },
+    )
+    assert client.get("/api/stock/reconcile").json() == []
+
+
+def test_batch_transactions_ledger_history_is_chronological(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "50.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+    client.post(
+        "/api/qc-tests",
+        json={"event_date": "2026-09-18", "pic_user_id": pic_id, "batch_id": batch_id, "stage": "RM"},
+    )
+
+    txns = client.get(f"/api/batches/{batch_id}/transactions").json()
+    assert len(txns) >= 1
+    assert txns[0]["direction"] == "IN"
+    assert txns[0]["quantity"] == "50.000"
+    assert txns[0]["balance_after"] == "50.000"
+
+
+def test_batch_stock_and_transactions_404_for_unknown_batch(client):
+    assert client.get("/api/batches/99999/stock").status_code == 404
+    assert client.get("/api/batches/99999/transactions").status_code == 404
+
+
+# ------------------------------------------------------- traceability (Fase 15 slice 4)
+# The traversal itself (backward/forward, supplier/shipment resolution,
+# incomplete-leaf classification) is already covered end-to-end in
+# test_traceability.py -- these confirm GET /batches/{id}/trace shapes that
+# same engine output correctly over HTTP.
+def test_batch_trace_resolves_supplier_and_upstream_event(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    trace = client.get(f"/api/batches/{batch_id}/trace")
+    assert trace.status_code == 200, trace.text
+    body = trace.json()
+    assert body["batch"]["batch_id"] == batch_id
+    assert len(body["suppliers"]) == 1
+    assert body["suppliers"][0]["supplier_code"] == "024"
+    assert len(body["upstream_events"]) == 1
+    assert body["upstream_events"][0]["event_type"] == "RECEIVING"
+    assert body["downstream_events"] == []
+    assert body["shipments"] == []
+    # ACTIVE, never consumed further -- a genuine still-in-process leaf
+    # (GENEALOGY.md §3.2, services/traceability.py incomplete_leaves()).
+    assert len(body["incomplete_leaves"]) == 1
+    assert body["incomplete_leaves"][0]["batch_id"] == batch_id
+
+
+def test_batch_trace_covers_split_genealogy_downstream(client, supplier_id, pic_id):
+    """Receiving -> Sortation (split into 2 grades): both output batches
+    must show up as forward-trace leaves (incomplete_leaves, since neither
+    is SHIPPED/REJECTED yet), and the Sortation event must appear in
+    downstream_events for the original batch's trace."""
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING",
+            "net_quantity": "100.000",
+        },
+    )
+    src_batch = r.json()["batch"]["batch_id"]
+    r = client.post(
+        "/api/sortation",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": src_batch,
+            "gourmet_qty": "60.000",
+            "eg_qty": "40.000",
+        },
+    )
+    output_ids = {b["batch_id"] for b in r.json()["batches"]}
+
+    trace = client.get(f"/api/batches/{src_batch}/trace").json()
+    downstream_types = {ev["event_type"] for ev in trace["downstream_events"]}
+    assert downstream_types == {"SORTATION"}
+    leaf_ids = {b["batch_id"] for b in trace["incomplete_leaves"]}
+    assert leaf_ids == output_ids
+
+
+def test_batch_trace_404_for_unknown_batch(client):
+    r = client.get("/api/batches/99999/trace")
+    assert r.status_code == 404

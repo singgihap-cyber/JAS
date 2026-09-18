@@ -54,7 +54,7 @@ let batches = [];
 const PAGE_TITLES = {
     dashboard: 'Dashboard', 'batch-input': 'Penerimaan Barang', proses: 'Input Proses',
     mixing: 'Mixing', 'vacuum-packing': 'Vacuum & Packing', 'batch-list': 'Daftar Batch', 'batch-history': 'Batch History',
-    suppliers: 'Data Supplier', users: 'User Management',
+    stock: 'Stock Monitoring', suppliers: 'Data Supplier', users: 'User Management',
 };
 document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -68,6 +68,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'dashboard') renderDashboard();
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
+        if (page === 'stock') renderStockSummary();
     });
 });
 
@@ -850,7 +851,9 @@ async function renderBatchList() {
 async function findBatch() {
     const id = document.getElementById('historySearch').value.trim();
     const el = document.getElementById('historyDetails');
+    const traceEl = document.getElementById('historyTrace');
     if (!id) return;
+    traceEl.innerHTML = '';
     try {
         const b = await api('GET', `/batches/${id}`);
         el.innerHTML = `
@@ -886,11 +889,148 @@ async function findBatch() {
                 </div>
             `).join('') || '<div style="color:var(--text-secondary);font-size:13px">Belum ada event.</div>'}
         `;
+        await renderChainOfCustody(id, traceEl);
     } catch (err) {
         el.innerHTML = `<p style="color:var(--danger)">${err.message}</p>`;
     }
 }
 document.getElementById('historySearch').addEventListener('keydown', e => { if (e.key === 'Enter') findBatch(); });
+
+// ─── CHAIN OF CUSTODY (Fase 14 report layer, over the Batch History page --
+// services/traceability.py chain_of_custody_report(), see GET
+// /batches/{id}/trace). This is the forward+backward end-to-end picture,
+// distinct from the linear per-batch event list `findBatch()` already
+// renders above: resolved suppliers at the backward root, resolved
+// shipments/customers at the forward leaves, and any leaves still
+// in-process (not yet SHIPPED/REJECTED) -- all fields the engine already
+// computed, nothing derived client-side. ──────────────────────────────
+function traceEventRowsHtml(events) {
+    return events.length ? events.map(ev => `
+        <tr>
+            <td>${ev.event_date}</td>
+            <td><span class="badge badge-primary">${ev.event_type}</span></td>
+            <td>${ev.pic || '–'}</td>
+            <td>${ev.total_input_quantity != null ? fmtQty(ev.total_input_quantity) : '–'}</td>
+            <td>${ev.total_output_quantity != null ? fmtQty(ev.total_output_quantity) : '–'}</td>
+            <td>${ev.notes || '–'}</td>
+        </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">–</td></tr>';
+}
+
+async function renderChainOfCustody(batchId, traceEl) {
+    try {
+        const t = await api('GET', `/batches/${batchId}/trace`);
+        const suppliersTxt = t.suppliers.length
+            ? t.suppliers.map(s => `<span class="badge badge-gray">${s.supplier_code} — ${s.name}</span>`).join(' ')
+            : '<span style="color:var(--text-secondary)">Tidak ada supplier di ujung backward (batch ini sendiri hasil proses, bukan langsung dari penerimaan)</span>';
+        const shipmentsTxt = t.shipments.length
+            ? t.shipments.map(s => `<span class="badge badge-gray">${s.shipping_number || '(tanpa nomor)'} → ${s.recipient || s.customer_name || s.destination || '–'}</span>`).join(' ')
+            : '<span style="color:var(--text-secondary)">Belum ada pengiriman tercatat di ujung forward</span>';
+        const incompleteTxt = t.incomplete_leaves.length
+            ? t.incomplete_leaves.map(b => `<span class="badge badge-warning">#${b.batch_id} (${b.status}, ${fmtQty(b.current_quantity)} kg)</span>`).join(' ')
+            : '<span class="badge badge-success">Tidak ada — semua ujung forward sudah SHIPPED/REJECTED</span>';
+        traceEl.innerHTML = `
+            <div class="form-divider">🔗 Chain of Custody (Forward + Backward)</div>
+            <div style="font-size:13px;margin-bottom:8px"><div class="form-label">Supplier Asal (backward root)</div>${suppliersTxt}</div>
+            <div style="font-size:13px;margin-bottom:8px"><div class="form-label">Pengiriman (forward leaves)</div>${shipmentsTxt}</div>
+            <div style="font-size:13px;margin-bottom:12px"><div class="form-label">Batch Masih Dalam Proses (belum SHIPPED/REJECTED)</div>${incompleteTxt}</div>
+            <div class="form-divider">⬅️ Riwayat Upstream (menuju supplier)</div>
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>Tanggal</th><th>Event</th><th>PIC</th><th>Qty In</th><th>Qty Out</th><th>Catatan</th></tr></thead>
+                    <tbody>${traceEventRowsHtml(t.upstream_events)}</tbody>
+                </table>
+            </div>
+            <div class="form-divider">➡️ Riwayat Downstream (menuju shipment)</div>
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>Tanggal</th><th>Event</th><th>PIC</th><th>Qty In</th><th>Qty Out</th><th>Catatan</th></tr></thead>
+                    <tbody>${traceEventRowsHtml(t.downstream_events)}</tbody>
+                </table>
+            </div>
+        `;
+    } catch (err) {
+        traceEl.innerHTML = `<p style="color:var(--danger)">Chain of custody gagal dimuat: ${err.message}</p>`;
+    }
+}
+
+// ─── STOCK MONITORING (Fase 13 report layer -- services/stock.py, all
+// read-only: no function there ever assigns to Batch.current_quantity, so
+// every call below is a GET) ────────────────────────────────────────────
+async function renderStockSummary() {
+    const [rows, total] = await Promise.all([
+        api('GET', '/stock/summary'),
+        api('GET', '/stock/total'),
+    ]);
+    document.getElementById('stockTotal').textContent = fmtQty(total.total_quantity) + ' kg';
+    document.getElementById('stockSummaryTable').innerHTML = rows.length ? rows.map(r => `
+        <tr>
+            <td>${r.supplier_id ? `${r.supplier_code} — ${r.supplier_name}` : '<span style="color:var(--text-secondary)">–</span>'}</td>
+            <td>${r.jenis_code || '–'}</td>
+            <td>${r.grade_code || '–'}</td>
+            <td>${r.batch_count}</td>
+            <td>${fmtQty(r.total_quantity)} kg</td>
+        </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">Belum ada stok aktif</td></tr>';
+}
+
+async function runStockReconciliation() {
+    const el = document.getElementById('reconcileResult');
+    el.innerHTML = '<p style="color:var(--text-secondary)">Menjalankan...</p>';
+    try {
+        const mismatches = await api('GET', '/stock/reconcile');
+        if (!mismatches.length) {
+            el.innerHTML = '<span class="badge badge-success">✅ Semua batch cocok — tidak ada selisih antara cache dan ledger.</span>';
+            return;
+        }
+        el.innerHTML = `<span class="badge badge-danger">⚠️ ${mismatches.length} batch tidak cocok</span>
+            <div class="table-container" style="margin-top:8px">
+                <table>
+                    <thead><tr><th>Batch ID</th><th>Status</th><th>Cache</th><th>Ledger</th></tr></thead>
+                    <tbody>${mismatches.map(m => `<tr><td class="batch-id">#${m.batch_id}</td><td>${m.status}</td>
+                        <td>${fmtQty(m.cached_quantity)}</td><td>${fmtQty(m.ledger_quantity)}</td></tr>`).join('')}</tbody>
+                </table>
+            </div>`;
+    } catch (err) {
+        el.innerHTML = `<p style="color:var(--danger)">${err.message}</p>`;
+    }
+}
+
+async function findBatchStock() {
+    const id = document.getElementById('stockBatchSearch').value.trim();
+    const el = document.getElementById('stockBatchResult');
+    if (!id) return;
+    el.innerHTML = '<p style="color:var(--text-secondary)">Memuat...</p>';
+    try {
+        const [balance, txns] = await Promise.all([
+            api('GET', `/batches/${id}/stock`),
+            api('GET', `/batches/${id}/transactions`),
+        ]);
+        const matchBadge = balance.matches
+            ? '<span class="badge badge-success">✅ Cocok</span>'
+            : '<span class="badge badge-danger">⚠️ Tidak cocok</span>';
+        el.innerHTML = `
+            <div style="font-size:13px;margin-bottom:10px">
+                Batch #${balance.batch_id} (${balance.status}) — Cache: <strong>${fmtQty(balance.cached_quantity)}</strong> kg,
+                Ledger: <strong>${fmtQty(balance.ledger_quantity)}</strong> kg — ${matchBadge}
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>Tanggal</th><th>Event ID</th><th>Arah</th><th>Qty</th><th>Saldo Setelah</th><th>Sampel?</th></tr></thead>
+                    <tbody>${txns.length ? txns.map(t => `
+                        <tr>
+                            <td>${new Date(t.created_at).toLocaleString('id-ID')}</td>
+                            <td>#${t.event_id}</td>
+                            <td><span class="badge badge-${t.direction === 'IN' ? 'success' : 'gray'}">${t.direction}</span></td>
+                            <td>${fmtQty(t.quantity)}</td>
+                            <td>${fmtQty(t.balance_after)}</td>
+                            <td>${t.is_sample ? 'Ya' : 'Tidak'}</td>
+                        </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">Belum ada transaksi</td></tr>'}</tbody>
+                </table>
+            </div>`;
+    } catch (err) {
+        el.innerHTML = `<p style="color:var(--danger)">${err.message}</p>`;
+    }
+}
+document.getElementById('stockBatchSearch').addEventListener('keydown', e => { if (e.key === 'Enter') findBatchStock(); });
 
 // ─── SHARED REFRESH ─────────────────────────────────────────────────────
 async function refreshBatches() {

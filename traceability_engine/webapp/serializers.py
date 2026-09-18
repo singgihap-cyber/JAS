@@ -9,13 +9,17 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Batch, EventBatchLink, ProcessEvent, QualityTest, Supplier
+from ..models import Batch, EventBatchLink, ProcessEvent, QualityTest, StockTransaction, Supplier
+from ..services.stock import BatchBalance, StockSummaryRow
 from .schemas import (
+    BatchBalanceOut,
     BatchDetailOut,
     BatchOut,
     EventBatchLinkOut,
     ProcessEventOut,
     QualityTestOut,
+    StockSummaryRowOut,
+    StockTransactionOut,
 )
 
 
@@ -110,4 +114,47 @@ def batch_detail_to_out(session: Session, batch: Batch) -> BatchDetailOut:
         **base.model_dump(),
         supplier_name=supplier_name,
         events=[event_to_out(session, e) for e in events],
+    )
+
+
+# ---------------------------------------------------------------- stock (13)
+def stock_transaction_to_out(txn: StockTransaction) -> StockTransactionOut:
+    return StockTransactionOut(
+        transaction_id=txn.transaction_id,
+        batch_id=txn.batch_id,
+        event_id=txn.event_id,
+        direction=txn.direction.value,
+        quantity=txn.quantity,
+        balance_after=txn.balance_after,
+        is_sample=txn.is_sample,
+        created_at=txn.created_at,
+    )
+
+
+def batch_balance_to_out(balance: BatchBalance) -> BatchBalanceOut:
+    return BatchBalanceOut(
+        batch_id=balance.batch_id,
+        status=balance.status.value,
+        cached_quantity=balance.cached_quantity,
+        ledger_quantity=balance.ledger_quantity,
+        matches=balance.matches,
+    )
+
+
+def stock_summary_row_to_out(session: Session, row: StockSummaryRow) -> StockSummaryRowOut:
+    supplier_code = None
+    supplier_name = None
+    if row.supplier_id is not None:
+        supplier = session.get(Supplier, row.supplier_id)
+        if supplier is not None:
+            supplier_code = supplier.supplier_code
+            supplier_name = supplier.name
+    return StockSummaryRowOut(
+        supplier_id=row.supplier_id,
+        supplier_code=supplier_code,
+        supplier_name=supplier_name,
+        jenis_code=row.jenis_code,
+        grade_code=row.grade_code,
+        batch_count=row.batch_count,
+        total_quantity=row.total_quantity,
     )

@@ -35,6 +35,8 @@ from .routers import (
     rework,
     sortation,
     steam_dry,
+    stock,
+    traceability,
     vacuum_packing,
 )
 
@@ -99,6 +101,8 @@ app.include_router(mixing.router, prefix=api_prefix)
 app.include_router(powder.router, prefix=api_prefix)
 app.include_router(rework.router, prefix=api_prefix)
 app.include_router(vacuum_packing.router, prefix=api_prefix)
+app.include_router(stock.router, prefix=api_prefix)
+app.include_router(traceability.router, prefix=api_prefix)
 app.include_router(batches.router, prefix=api_prefix)
 
 _static_dir = Path(__file__).parent / "static"
