@@ -486,6 +486,7 @@ const STAGE_DEFS = [
     },
     {
         key: 'sortation', label: '🧺 Sortasi', endpoint: '/sortation',
+        dateLabel: 'Tanggal Mulai Sortasi (sebelum uji MD/KW pada bagian yang sudah disortir)',
         fields: [
             { id: 'initial_qty', label: 'Qty Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
             { id: 'gourmet_qty', label: 'Gourmet (kg)', type: 'number', step: '0.001' },
@@ -502,7 +503,7 @@ const STAGE_DEFS = [
                 id: 'process_code', label: 'Jenis Proses — kosongkan = Original', type: 'select',
                 options: [{ value: '00', label: '00 — Original' }, { value: '01', label: '01 — Upgrade' }, { value: '02', label: '02 — Downgrade' }],
             },
-            { id: 'end_date', label: 'Tanggal Selesai', type: 'date' },
+            { id: 'end_date', label: 'Tanggal Selesai (tanggal di nomor batch)', type: 'date' },
         ],
         historyCols: ['shrinkage_qty', 'outputs'],
     },
@@ -585,7 +586,7 @@ function renderProsesFields() {
     if (!def) { host.innerHTML = ''; return; }
     host.innerHTML = `<div class="form-divider">${def.label}</div>
         <div class="form-group">
-            <label class="form-label">Tanggal <span style="color:var(--danger)">*</span></label>
+            <label class="form-label">${def.dateLabel || 'Tanggal'} <span style="color:var(--danger)">*</span></label>
             <input type="date" class="form-input" id="pf_event_date" value="${todayStr()}" required>
         </div>` +
         def.fields.map(f => {
