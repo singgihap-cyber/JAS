@@ -29,17 +29,22 @@ class EventType(str, enum.Enum):
     RECEIVING = "RECEIVING"
     QC_TEST = "QC_TEST"
     METAL_DETECTION = "METAL_DETECTION"
-    STEAMING = "STEAMING"
+    STEAMING = "STEAMING"  # Kering route only -- Hijau has no Steaming step, see BLANCHING below
     SUNDRYING = "SUNDRYING"
     # Fase 19 -- Hijau (green-curing) route only, WORKFLOW.md/CLAUDE.md:
-    # PB -> Sortation -> Steaming/blanching -> Main Curing -> 1st Curing ->
-    # 2nd Curing -> 3rd Curing -> Sundrying -> Airdrying -> Sortation -> ...
-    # Steaming/blanching and the later Sundrying reuse STEAMING/SUNDRYING
-    # above rather than getting their own types -- see services/curing.py
-    # module docstring #1 for why (traceability-trial(1).html STAGE_DEFS
-    # confirms both are the same stage definition across both routes, only
-    # the byAlur hint text differs). These five are the genuinely new
-    # stages with no Kering equivalent.
+    # PB -> Sortation -> Lepas Tangkai -> Blanching -> Main Curing ->
+    # 1st Curing -> 2nd Curing -> 3rd Curing -> Sundrying -> Airdrying ->
+    # Sortation -> ...
+    # Corrected in Fase 22 (2026-09-19, real source PROSES HIJAU 2026.xlsx +
+    # Tommy's direct clarification: "Steaming hanya digunakan di proses
+    # kering. Untuk Hijau setelah lepas tangkai langsung ke blanching") --
+    # see services/curing.py module docstring for the full mapping and why.
+    # STEM_REMOVAL and BLANCHING are new event types (Hijau-route only, no
+    # Kering equivalent); the later Sundrying step still reuses SUNDRYING
+    # above unchanged. MAIN/FIRST/SECOND/THIRD_CURING and AIRDRYING are the
+    # remaining genuinely new stages with no Kering equivalent.
+    STEM_REMOVAL = "STEM_REMOVAL"
+    BLANCHING = "BLANCHING"
     MAIN_CURING = "MAIN_CURING"
     FIRST_CURING = "FIRST_CURING"
     SECOND_CURING = "SECOND_CURING"

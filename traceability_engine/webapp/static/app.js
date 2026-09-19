@@ -412,63 +412,71 @@ const STAGE_DEFS = [
         ],
         historyCols: ['final_quantity', 'shrinkage_qty', 'drying_duration'],
     },
-    // Hijau route only: Main/1st/2nd/3rd Curing, Airdrying (Fase 19 engine,
-    // services/curing.py). No source document defines field-level detail
-    // for these five stages -- fields are modeled on Sundrying's
-    // starting/final-quantity-with-derived-shrinkage shape and marked
-    // [UNCONFIRMED] (curing.py module docstring #2-5), same as the router
-    // schemas (webapp/schemas.py). Steaming/blanching and the later
-    // Sundrying step in this route reuse the existing 'steaming'/'sundrying'
-    // stage entries above unchanged (curing.py #1) -- not repeated here.
+    // Hijau route only (services/curing.py). Fase 22 (2026-09-19) replaced
+    // the Fase 19/20 [UNCONFIRMED] guesses with real fields from PT JAS's
+    // PROSES HIJAU 2026.xlsx. Steaming above is Kering-only now -- Hijau's
+    // equivalent is the dedicated 'blanching' stage below, not a reuse of
+    // 'steaming' (curing.py module docstring #1). The later Sundrying step
+    // in this route still reuses the 'sundrying' stage entry above
+    // unchanged.
+    {
+        key: 'stem_removal', label: '🌿 Lepas Tangkai (Hijau)', endpoint: '/stem-removal',
+        fields: [
+            { id: 'starting_quantity', label: 'Berat (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
+        ],
+        historyCols: ['final_quantity', 'shrinkage_qty'],
+    },
+    {
+        key: 'blanching', label: '♨️ Blanching (Hijau)', endpoint: '/blanching',
+        fields: [
+            { id: 'quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'temperature', label: 'Suhu (°C)', type: 'number', step: '0.1', placeholder: 'umumnya ~65°C' },
+            { id: 'dip_duration_minutes', label: 'Lama Celup (menit)', type: 'number', step: '0.1', placeholder: 'umumnya ~2 menit' },
+        ],
+        historyCols: ['temperature', 'dip_duration_minutes'],
+    },
     {
         key: 'main_curing', label: '🫙 Main Curing (Hijau)', endpoint: '/main-curing',
         fields: [
-            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
-            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
-            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
-            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+            { id: 'quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'duration_hours', label: 'Lama Pemeraman (jam)', type: 'number', step: '0.1' },
         ],
-        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+        historyCols: ['duration_hours'],
     },
     {
         key: 'first_curing', label: '🫙 1st Curing (Hijau)', endpoint: '/first-curing',
         fields: [
-            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
-            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
-            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
-            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+            { id: 'quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'duration_hours', label: 'Lama Pemeraman (jam)', type: 'number', step: '0.1' },
         ],
-        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+        historyCols: ['duration_hours'],
     },
     {
         key: 'second_curing', label: '🫙 2nd Curing (Hijau)', endpoint: '/second-curing',
         fields: [
-            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
-            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
-            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
-            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+            { id: 'quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'duration_hours', label: 'Lama Pemeraman (jam)', type: 'number', step: '0.1' },
         ],
-        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+        historyCols: ['duration_hours'],
     },
     {
         key: 'third_curing', label: '🫙 3rd Curing (Hijau)', endpoint: '/third-curing',
         fields: [
-            { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
-            { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
-            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
-            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+            { id: 'quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'duration_hours', label: 'Lama Pemeraman (jam)', type: 'number', step: '0.1' },
         ],
-        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+        historyCols: ['duration_hours'],
     },
     {
         key: 'airdrying', label: '🌬️ Airdrying (Hijau)', endpoint: '/airdrying',
         fields: [
             { id: 'starting_quantity', label: 'Berat Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
             { id: 'final_quantity', label: 'Berat Akhir (kg)', type: 'number', step: '0.001', required: true },
-            { id: 'duration', label: 'Durasi — [UNCONFIRMED]', type: 'text', placeholder: 'mis. 5 hari' },
-            { id: 'condition_notes', label: 'Kondisi / Catatan — [UNCONFIRMED]', type: 'text' },
+            { id: 'duration_days', label: 'Lama (hari)', type: 'number', step: '1' },
+            { id: 'final_ka', label: 'KA Akhir (%)', type: 'number', step: '0.01' },
         ],
-        historyCols: ['final_quantity', 'shrinkage_qty', 'duration'],
+        historyCols: ['final_quantity', 'shrinkage_qty', 'final_ka'],
     },
     {
         key: 'sortation', label: '🧺 Sortasi', endpoint: '/sortation',
@@ -593,6 +601,7 @@ async function renderProsesHistory() {
     document.getElementById('prosesRiwayatTitle').textContent = `📊 Riwayat ${def.label}`;
     const eventTypeMap = {
         qc_test: 'QC_TEST', metal_detection: 'METAL_DETECTION', steaming: 'STEAMING', sundrying: 'SUNDRYING',
+        stem_removal: 'STEM_REMOVAL', blanching: 'BLANCHING',
         main_curing: 'MAIN_CURING', first_curing: 'FIRST_CURING', second_curing: 'SECOND_CURING',
         third_curing: 'THIRD_CURING', airdrying: 'AIRDRYING',
         sortation: 'SORTATION', grinding: 'GRINDING', magnetization: 'MAGNETIZATION', md_powder: 'MD_POWDER',

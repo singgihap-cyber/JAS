@@ -1440,26 +1440,28 @@ def test_reject_and_supersede_404_for_unknown_batch(client, pic_id):
     assert r2.status_code == 404
 
 
-# --------------------------------------------------------- Fase 20: Hijau curing/airdrying UI
-# API-level tests for the five endpoints added over the Fase 19 engine
-# (services/curing.py) -- routers/curing.py, schemas MainCuringCreate/
-# FirstCuringCreate/SecondCuringCreate/ThirdCuringCreate/AirdryingCreate.
-# Mirrors test_full_chain_receiving_qc_md_steam_dry's shape: exercise the
-# real HTTP layer (request parsing, shrinkage derivation surfaced in the
-# response, event-type filtering), not the service functions directly --
-# those already have unit coverage in tests/test_curing.py.
+# ---------------------------------------------- Fase 20 UI / Fase 22 correction: Hijau route
+# API-level tests for the six endpoints over services/curing.py --
+# routers/curing.py, schemas StemRemovalCreate/BlanchingCreate/
+# MainCuringCreate/FirstCuringCreate/SecondCuringCreate/ThirdCuringCreate/
+# AirdryingCreate. Fase 22 (2026-09-19) corrected these shapes against a
+# real source document (PROSES HIJAU 2026.xlsx) -- see
+# services/curing.py module docstring. Mirrors
+# test_full_chain_receiving_qc_md_steam_dry's shape: exercise the real HTTP
+# layer, not the service functions directly (unit coverage lives in
+# tests/test_curing.py).
 
-HIJAU_CURING_ENDPOINTS = [
+# Main/1st/2nd/3rd Curing are stock-neutral (no final_quantity/shrinkage).
+HIJAU_CURING_NEUTRAL_ENDPOINTS = [
     ("/api/main-curing", "MAIN_CURING"),
     ("/api/first-curing", "FIRST_CURING"),
     ("/api/second-curing", "SECOND_CURING"),
     ("/api/third-curing", "THIRD_CURING"),
-    ("/api/airdrying", "AIRDRYING"),
 ]
 
 
-@pytest.mark.parametrize("endpoint,event_type", HIJAU_CURING_ENDPOINTS)
-def test_hijau_curing_stage_derives_shrinkage_over_http(client, supplier_id, pic_id, endpoint, event_type):
+@pytest.mark.parametrize("endpoint,event_type", HIJAU_CURING_NEUTRAL_ENDPOINTS)
+def test_hijau_curing_stage_is_stock_neutral_over_http(client, supplier_id, pic_id, endpoint, event_type):
     r = client.post(
         "/api/receiving",
         json={
@@ -1478,25 +1480,23 @@ def test_hijau_curing_stage_derives_shrinkage_over_http(client, supplier_id, pic
             "event_date": "2026-09-18",
             "pic_user_id": pic_id,
             "batch_id": batch_id,
-            "final_quantity": "92.500",
-            "duration": "5 hari",
-            "condition_notes": "Dibungkus karung goni",
+            "duration_hours": "20",
         },
     )
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["event_type"] == event_type
-    # Shrinkage must come back derived from the engine (starting on-hand
-    # qty, since starting_quantity was omitted -- CuringStageInput default),
-    # never computed/sent by the caller.
-    assert body["shrinkage_qty"] == "7.500"
+    assert body["shrinkage_qty"] == "0"
+
+    detail = client.get(f"/api/batches/{batch_id}")
+    assert detail.json()["current_quantity"] == "100.000"
 
     history = client.get("/api/process-events", params={"batch_id": batch_id, "event_type": event_type})
     assert history.status_code == 200
     assert len(history.json()) == 1
 
 
-@pytest.mark.parametrize("endpoint,event_type", HIJAU_CURING_ENDPOINTS)
+@pytest.mark.parametrize("endpoint,event_type", HIJAU_CURING_NEUTRAL_ENDPOINTS)
 def test_hijau_curing_stage_on_missing_batch_is_422_not_500(client, pic_id, endpoint, event_type):
     r = client.post(
         endpoint,
@@ -1504,20 +1504,72 @@ def test_hijau_curing_stage_on_missing_batch_is_422_not_500(client, pic_id, endp
             "event_date": "2026-09-18",
             "pic_user_id": pic_id,
             "batch_id": 999999,
-            "final_quantity": "10.000",
         },
     )
     assert r.status_code == 422
     assert r.json()["error"] == "invalid_input"
 
 
-def test_hijau_curing_full_chain_reuses_steaming_and_sundrying(client, supplier_id, pic_id):
-    """curing.py module docstring #1: Steaming/blanching and Sundrying on
-    the Hijau route are NOT new event types -- they reuse EventType.STEAMING
-    / EventType.SUNDRYING unchanged. This drives the full Hijau chain
-    (Steaming -> Main -> 1st -> 2nd -> 3rd Curing -> Sundrying -> Airdrying)
-    through the HTTP layer and checks the batch's event history reflects
-    all seven stages with a monotonically shrinking on-hand quantity."""
+def test_stem_removal_derives_shrinkage_over_http(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_HIJAU",
+            "net_quantity": "77.740",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/stem-removal",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "final_quantity": "75.440",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["event_type"] == "STEM_REMOVAL"
+    assert r.json()["shrinkage_qty"] == "2.300"
+
+
+def test_blanching_is_stock_neutral_and_not_steaming_over_http(client, supplier_id, pic_id):
+    r = client.post(
+        "/api/receiving",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "supplier_id": supplier_id,
+            "batch_type": "RAW_HIJAU",
+            "net_quantity": "75.440",
+        },
+    )
+    batch_id = r.json()["batch"]["batch_id"]
+
+    r = client.post(
+        "/api/blanching",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "temperature": "65.0",
+            "dip_duration_minutes": "2",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["event_type"] == "BLANCHING"
+    assert r.json()["shrinkage_qty"] == "0"
+
+
+def test_hijau_full_chain_over_http(client, supplier_id, pic_id):
+    """WORKFLOW.md Hijau route, corrected in Fase 22: Lepas Tangkai ->
+    Blanching -> Main -> 1st -> 2nd -> 3rd Curing -> Sundrying -> Airdrying,
+    through the HTTP layer. Blanching is its own event type, distinct from
+    Steaming (Kering-only, curing.py module docstring #1)."""
     r = client.post(
         "/api/receiving",
         json={
@@ -1530,31 +1582,33 @@ def test_hijau_curing_full_chain_reuses_steaming_and_sundrying(client, supplier_
     )
     batch_id = r.json()["batch"]["batch_id"]
 
-    steam = client.post(
-        "/api/steaming",
+    stem = client.post(
+        "/api/stem-removal",
         json={
             "event_date": "2026-09-18",
             "pic_user_id": pic_id,
             "batch_id": batch_id,
-            "steam_temperature": "62.0",
+            "final_quantity": "97.000",
         },
     )
-    assert steam.status_code == 201, steam.text
+    assert stem.status_code == 201, stem.text
 
-    for endpoint, final_qty in [
-        ("/api/main-curing", "95.000"),
-        ("/api/first-curing", "90.000"),
-        ("/api/second-curing", "85.000"),
-        ("/api/third-curing", "80.000"),
-    ]:
+    blanch = client.post(
+        "/api/blanching",
+        json={
+            "event_date": "2026-09-18",
+            "pic_user_id": pic_id,
+            "batch_id": batch_id,
+            "temperature": "65.0",
+            "dip_duration_minutes": "2",
+        },
+    )
+    assert blanch.status_code == 201, blanch.text
+
+    for endpoint in ("/api/main-curing", "/api/first-curing", "/api/second-curing", "/api/third-curing"):
         r = client.post(
             endpoint,
-            json={
-                "event_date": "2026-09-18",
-                "pic_user_id": pic_id,
-                "batch_id": batch_id,
-                "final_quantity": final_qty,
-            },
+            json={"event_date": "2026-09-18", "pic_user_id": pic_id, "batch_id": batch_id},
         )
         assert r.status_code == 201, r.text
 
@@ -1577,6 +1631,8 @@ def test_hijau_curing_full_chain_reuses_steaming_and_sundrying(client, supplier_
             "pic_user_id": pic_id,
             "batch_id": batch_id,
             "final_quantity": "65.000",
+            "duration_days": "19",
+            "final_ka": "22.05",
         },
     )
     assert air.status_code == 201, air.text
@@ -1589,7 +1645,8 @@ def test_hijau_curing_full_chain_reuses_steaming_and_sundrying(client, supplier_
     event_types = [e["event_type"] for e in body["events"]]
     assert event_types == [
         "RECEIVING",
-        "STEAMING",
+        "STEM_REMOVAL",
+        "BLANCHING",
         "MAIN_CURING",
         "FIRST_CURING",
         "SECOND_CURING",

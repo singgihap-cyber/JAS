@@ -239,12 +239,13 @@ class SundryingCreate(BaseModel):
     drying_duration: Optional[str] = None
 
 
-# ------------------------------- curing / airdrying (Hijau route, Fase 19 engine / Fase 20 UI)
-# Same field shape for all five (services/curing.py CuringStageInput, one
-# shared dataclass) -- five separate schema classes anyway, one per
-# EventType/business concept, matching the Magnetization/MDPowder
-# convention (routers/powder.py) rather than a single reused class.
-class MainCuringCreate(BaseModel):
+# ------------------- Hijau route stages (Fase 19 engine / Fase 20 UI / Fase 22 correction)
+# Fase 22 (2026-09-19): PROSES HIJAU 2026.xlsx supplied real fields for
+# these stages, correcting several Fase 19/20 guesses -- see
+# services/curing.py module docstring for the full explanation.
+class StemRemovalCreate(BaseModel):
+    """Lepas Tangkai -- self-loop with derived shrinkage (LIMBAH)."""
+
     event_date: dt.date
     event_time: Optional[dt.time] = None
     pic_user_id: int
@@ -252,8 +253,36 @@ class MainCuringCreate(BaseModel):
     final_quantity: Decimal
     starting_quantity: Optional[Decimal] = None
     unit: str = "kg"
-    duration: Optional[str] = None  # free text, unit varies -- curing.py #4 [UNCONFIRMED]
-    condition_notes: Optional[str] = None  # curing.py #5 [UNCONFIRMED]
+
+
+class BlanchingCreate(BaseModel):
+    """Pelayuan/Blanching -- Hijau-route only, distinct from Steaming
+    (curing.py module docstring #1). Stock-neutral self-loop."""
+
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    quantity: Optional[Decimal] = None
+    unit: str = "kg"
+    temperature: Optional[Decimal] = None
+    dip_duration_minutes: Optional[Decimal] = None
+
+
+# Same field shape for all four (services/curing.py CuringStageInput, one
+# shared dataclass) -- four separate schema classes anyway, one per
+# EventType/business concept, matching the Magnetization/MDPowder
+# convention (routers/powder.py) rather than a single reused class.
+# Stock-neutral (no final_quantity/shrinkage) -- curing.py module docstring
+# #3, corrected in Fase 22.
+class MainCuringCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    pic_user_id: int
+    batch_id: int
+    quantity: Optional[Decimal] = None
+    unit: str = "kg"
+    duration_hours: Optional[Decimal] = None  # "LAMA PEMERAMAN (JAM)" -- confirmed unit
 
 
 class FirstCuringCreate(BaseModel):
@@ -261,11 +290,9 @@ class FirstCuringCreate(BaseModel):
     event_time: Optional[dt.time] = None
     pic_user_id: int
     batch_id: int
-    final_quantity: Decimal
-    starting_quantity: Optional[Decimal] = None
+    quantity: Optional[Decimal] = None
     unit: str = "kg"
-    duration: Optional[str] = None
-    condition_notes: Optional[str] = None
+    duration_hours: Optional[Decimal] = None
 
 
 class SecondCuringCreate(BaseModel):
@@ -273,11 +300,9 @@ class SecondCuringCreate(BaseModel):
     event_time: Optional[dt.time] = None
     pic_user_id: int
     batch_id: int
-    final_quantity: Decimal
-    starting_quantity: Optional[Decimal] = None
+    quantity: Optional[Decimal] = None
     unit: str = "kg"
-    duration: Optional[str] = None
-    condition_notes: Optional[str] = None
+    duration_hours: Optional[Decimal] = None
 
 
 class ThirdCuringCreate(BaseModel):
@@ -285,14 +310,16 @@ class ThirdCuringCreate(BaseModel):
     event_time: Optional[dt.time] = None
     pic_user_id: int
     batch_id: int
-    final_quantity: Decimal
-    starting_quantity: Optional[Decimal] = None
+    quantity: Optional[Decimal] = None
     unit: str = "kg"
-    duration: Optional[str] = None
-    condition_notes: Optional[str] = None
+    duration_hours: Optional[Decimal] = None
 
 
 class AirdryingCreate(BaseModel):
+    """The one Hijau stage that keeps the shrinkage shape -- plus
+    duration_days/final_ka, both confirmed fields from the KR sheet
+    (curing.py module docstring #4)."""
+
     event_date: dt.date
     event_time: Optional[dt.time] = None
     pic_user_id: int
@@ -300,8 +327,8 @@ class AirdryingCreate(BaseModel):
     final_quantity: Decimal
     starting_quantity: Optional[Decimal] = None
     unit: str = "kg"
-    duration: Optional[str] = None
-    condition_notes: Optional[str] = None
+    duration_days: Optional[Decimal] = None
+    final_ka: Optional[Decimal] = None
 
 
 # ------------------------------------------------------------------ sortation
