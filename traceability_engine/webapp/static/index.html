@@ -872,6 +872,20 @@
                 </div>
                 <div id="historyTrace" style="margin-top:10px"></div>
             </div>
+            <div class="section">
+                <div class="section-title">📐 Rendemen Sortasi</div>
+                <div class="info-box">
+                    Rendemen = berat bahan baku diterima (netto PPH) ÷ total hasil sortasi, dihitung otomatis dari
+                    genealogi — sama dengan kolom RENDEMEN di sheet SORT (rasio kg bahan baku per kg hasil,
+                    bukan persen). Kosong (–) bila asal-usul batch belum lengkap.
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Tanggal</th><th>Batch Sumber</th><th>Berat Bahan Baku</th><th>Total Hasil</th><th>Susut</th><th>Rendemen</th><th>Hasil (%)</th><th>Output</th></tr></thead>
+                        <tbody id="rendemenTable"><tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Memuat...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
 
         <!-- STOCK MONITORING -->

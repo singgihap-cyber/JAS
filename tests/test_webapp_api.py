@@ -1678,3 +1678,28 @@ def test_fase23_transport_fields_and_sortation_batch_numbers_via_api(client, sup
     out = r.json()["batches"][0]
     assert out["batch_number"] == "030218-260618-00"
     assert out["jenis_code"] == "03" and out["receiving_date"] == "2026-06-18"
+
+
+def test_rendemen_sortation_endpoints(client, supplier_id, pic_id):
+    """Fase 24: RENDEMEN derived from genealogy, list + single + 404."""
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-18", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_HIJAU", "net_quantity": "77.740"})
+    src = r.json()["batch"]["batch_id"]
+    s = client.post("/api/sortation", json={
+        "event_date": "2026-09-18", "pic_user_id": pic_id, "batch_id": src,
+        "initial_qty": "77.740", "eg_qty": "11.280", "ep_qty": "2.275"})
+    assert s.status_code == 201, s.text
+    event_id = s.json()["event"]["event_id"]
+
+    rows = client.get("/api/rendemen/sortation").json()
+    assert len(rows) == 1 and rows[0]["event_id"] == event_id
+    assert rows[0]["raw_weight"] == "77.740" and rows[0]["complete"] is True
+    assert rows[0]["output_quantity"] == "13.555"
+    assert rows[0]["rendemen"] == "5.7352" and len(rows[0]["outputs"]) == 2
+
+    one = client.get(f"/api/rendemen/sortation/{event_id}")
+    assert one.status_code == 200 and one.json()["rendemen"] == "5.7352"
+    assert len(client.get("/api/rendemen/sortation", params={"batch_id": src}).json()) == 1
+    assert client.get("/api/rendemen/sortation", params={"batch_id": 999}).json() == []
+    assert client.get("/api/rendemen/sortation/9999").status_code == 404

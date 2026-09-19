@@ -668,3 +668,30 @@ class AuditLogOut(BaseModel):
 class ErrorOut(BaseModel):
     error: str
     detail: str
+
+
+# ------------------------------------------------------------ rendemen (Fase 24)
+class SortationOutputOut(BaseModel):
+    batch_id: int
+    batch_number: Optional[str] = None
+    grade_code: Optional[str] = None
+    quantity: Decimal
+
+
+class SortationRendemenOut(BaseModel):
+    """Mirrors services/rendemen.py `SortationRendemen` field-for-field.
+    `rendemen` is the SORT sheet's ratio (kg raw per kg sorted), not a
+    percent; `raw_weight`/`rendemen` are null when lineage is incomplete."""
+
+    event_id: int
+    event_date: dt.date
+    input_batch_id: int
+    input_batch_number: Optional[str] = None
+    input_quantity: Decimal
+    output_quantity: Decimal
+    shrinkage_qty: Decimal
+    raw_weight: Optional[Decimal] = None
+    rendemen: Optional[Decimal] = None
+    yield_percent: Optional[Decimal] = None
+    complete: bool
+    outputs: list[SortationOutputOut] = []

@@ -74,6 +74,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
         if (page === 'adjustment') renderAuditLog();
         if (page === 'stock') renderStockSummary();
+        if (page === 'batch-history') renderRendemenSortation();
     });
 });
 
@@ -1584,3 +1585,28 @@ async function boot() {
     }
 }
 boot();
+
+
+// ─── RENDEMEN SORTASI (Fase 24) -- GET /rendemen/sortation, derived from
+// genealogy server-side (services/rendemen.py); nothing computed here. ─────
+async function renderRendemenSortation() {
+    const tb = document.getElementById('rendemenTable');
+    try {
+        const rows = await api('GET', '/rendemen/sortation');
+        const dash = '–';
+        tb.innerHTML = rows.length ? rows.slice().reverse().map(r => `
+            <tr>
+                <td>${r.event_date}</td>
+                <td>#${r.input_batch_id} ${r.input_batch_number || ''}</td>
+                <td>${r.raw_weight != null ? fmtQty(r.raw_weight) : dash}</td>
+                <td>${fmtQty(r.output_quantity)}</td>
+                <td>${fmtQty(r.shrinkage_qty)}</td>
+                <td><strong>${r.rendemen != null ? Number(r.rendemen).toFixed(2) : dash}</strong></td>
+                <td>${r.yield_percent != null ? Number(r.yield_percent).toFixed(2) + '%' : dash}</td>
+                <td>${r.outputs.map(o => `#${o.batch_id} ${o.batch_number || ''} (${fmtQty(o.quantity)})`).join(', ')}</td>
+            </tr>`).join('')
+            : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada sortasi</td></tr>';
+    } catch (err) {
+        tb.innerHTML = `<tr><td colspan="8" style="color:var(--danger)">Rendemen gagal dimuat: ${err.message}</td></tr>`;
+    }
+}

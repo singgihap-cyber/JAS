@@ -35,6 +35,7 @@ from .routers import (
     powder,
     qc_md,
     receiving,
+    rendemen,
     rework,
     sortation,
     steam_dry,
@@ -109,6 +110,7 @@ app.include_router(delivery.router, prefix=api_prefix)
 app.include_router(adjustment.router, prefix=api_prefix)
 app.include_router(stock.router, prefix=api_prefix)
 app.include_router(traceability.router, prefix=api_prefix)
+app.include_router(rendemen.router, prefix=api_prefix)
 app.include_router(batches.router, prefix=api_prefix)
 
 _static_dir = Path(__file__).parent / "static"
