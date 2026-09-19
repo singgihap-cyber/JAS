@@ -70,6 +70,18 @@ ambiguity instead of guessing):
    (qc_md.py docstring #1) -- CLAUDE.md rule 11 forbids guessing which
    direction a re-grade went.
 
+9. **Fase 23: optional per-grade output batch numbers.** The real SORT
+   sheet (`PROSES HIJAU 2026.xlsx`) records the batch number staff assign
+   to each grade output. `SortationInput.<grade>_batch_number` stores it
+   on the new `Batch` and, when it parses, its AA/BB/CC/date/PP components
+   replace the inherited ones (#4) -- real example: green `040018-260505-00`
+   sorted on 2026-06-18 yields EG `030218-260618-00` (AA `04`->`03`, date
+   segment = sort date). No batch-number *generation* is implemented
+   (batch_number.py still blocks it); staff type the number. The grade
+   segment of a typed number is not cross-checked against its slot: the
+   spec's own `030442-251113-02` shows staff labelling that differs from
+   the BB code, and rule 11 forbids inventing a rejection rule.
+
 6. **`shrinkage_qty` (and therefore SORT's own "final qty" field) is
    derived, not caller-supplied**: `shrinkage_qty = initial_qty -
    SUM(grade quantities)`, mirroring Fase 6 Sundrying's derived-shrinkage
@@ -106,6 +118,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from .. import batch_number as batch_number_mod
 from ..enums import BatchType, EventType
 from ..models import Batch, ProcessEvent
 from .events import InputSpec, NewBatchSpec, OutputSpec, record_process_event
@@ -160,12 +173,64 @@ class SortationInput:
     ep_batch_type: Optional[BatchType] = None
     nc_batch_type: Optional[BatchType] = None
     powder_batch_type: Optional[BatchType] = None
+    # Fase 23 -- SORT sheet (PROSES HIJAU 2026.xlsx) lists the output batch
+    # number per grade (BATCH-G / BATCH-EG / BATCH-EP) as staff-assigned
+    # input, e.g. `040018-260505-00` -> EG `030218-260618-00`. See module
+    # docstring #9.
+    gourmet_batch_number: Optional[str] = None
+    eg_batch_number: Optional[str] = None
+    ep_batch_number: Optional[str] = None
+    nc_batch_number: Optional[str] = None
+    powder_batch_number: Optional[str] = None
 
 
 def _sort_notes(data: SortationInput) -> Optional[str]:
     if data.end_date is None:
         return None
     return json.dumps({"end_date": data.end_date.isoformat()}, ensure_ascii=False)
+
+
+_BATCH_NUMBER_ATTR = {
+    "gourmet_qty": "gourmet_batch_number",
+    "eg_qty": "eg_batch_number",
+    "ep_qty": "ep_batch_number",
+    "nc_qty": "nc_batch_number",
+    "powder_qty": "powder_batch_number",
+}
+
+
+def _new_batch_spec(source: Batch, data: "SortationInput", attr: str, grade_code: str,
+                    batch_type: BatchType) -> NewBatchSpec:
+    """Build the NewBatchSpec for one grade output (module docstring #4/#9).
+
+    Without a staff-supplied batch number the identifying fields are
+    inherited from the source batch (unchanged pre-Fase 23 behavior). With
+    one, a cleanly-parsing number is the source of truth for
+    jenis/grade/supplier/date/process -- the real SORT sheet shows AA
+    flipping `04` -> `03` and the date segment becoming the sort date, so
+    inheriting from the source would contradict the number staff typed. An
+    unparseable number is stored as free text with inherited components,
+    same lenient rule as Receiving (receiving.py #1).
+    """
+    supplied = getattr(data, _BATCH_NUMBER_ATTR[attr])
+    supplied = supplied.strip() if supplied else None
+    parsed = None
+    if supplied:
+        try:
+            parsed = batch_number_mod.parse(supplied)
+        except ValueError:
+            parsed = None
+    return NewBatchSpec(
+        batch_type=batch_type,
+        batch_number=supplied or None,
+        grade_code=parsed.grade_code if parsed else grade_code,
+        jenis_code=parsed.jenis_code if parsed else source.jenis_code,
+        supplier_id=source.supplier_id,
+        supplier_code=parsed.supplier_code if parsed else source.supplier_code,
+        receiving_date=parsed.receiving_date if parsed else source.receiving_date,
+        process_code=parsed.process_code if parsed else data.process_code,
+        unit=data.unit,
+    )
 
 
 _OVERRIDE_ATTR = {
@@ -206,16 +271,7 @@ def record_sortation(session: Session, data: SortationInput) -> ProcessEvent:
             OutputSpec(
                 quantity=qty,
                 unit=data.unit,
-                new_batch=NewBatchSpec(
-                    batch_type=batch_type,
-                    grade_code=grade_code,
-                    jenis_code=source.jenis_code,  # inherited -- see #4
-                    supplier_id=source.supplier_id,
-                    supplier_code=source.supplier_code,
-                    receiving_date=source.receiving_date,
-                    process_code=data.process_code,
-                    unit=data.unit,
-                ),
+                new_batch=_new_batch_spec(source, data, attr, grade_code, batch_type),
             )
         )
 

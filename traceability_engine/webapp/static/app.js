@@ -345,6 +345,8 @@ document.getElementById('receivingForm').addEventListener('submit', async (e) =>
         on_spec_qty: document.getElementById('rOnSpec').value || null,
         off_spec_qty: document.getElementById('rOffSpec').value || null,
         smell_test: document.getElementById('rSmell').value.trim() || null,
+        transport_no: document.getElementById('rNoAngkut').value.trim() || null,
+        transport_condition: document.getElementById('rKondisiAngkut').value.trim() || null,
     };
     if (!payload.pic_user_id || !payload.supplier_id) { toast('PIC dan Supplier harus dipilih.', 'error'); return; }
     try {
@@ -367,6 +369,9 @@ const STAGE_DEFS = [
         fields: [
             { id: 'stage', label: 'Status Sampel', type: 'select', required: true, options: ['RM', 'IP', 'FP'] },
             { id: 'quantity', label: 'Quantity (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
+            { id: 'sample_received_date', label: 'Tanggal Terima Sampel', type: 'date' },
+            { id: 'product_description', label: 'Deskripsi Vanilla (mis. EG / GOURMET)', type: 'text' },
+            { id: 'method_temperature', label: 'Metode Suhu (°C, mis. 153)', type: 'number', step: '1' },
             { id: 'sample_weight', label: 'Berat Sampel (g)', type: 'number', step: '0.01' },
             { id: 'ka_1', label: 'KA 1 (%)', type: 'number', step: '0.01' },
             { id: 'ka_2', label: 'KA 2 (%)', type: 'number', step: '0.01' },
@@ -487,6 +492,11 @@ const STAGE_DEFS = [
             { id: 'ep_qty', label: 'EP (kg)', type: 'number', step: '0.001' },
             { id: 'nc_qty', label: 'NC / Non Conform (kg)', type: 'number', step: '0.001' },
             { id: 'powder_qty', label: 'Powder (kg)', type: 'number', step: '0.001' },
+            { id: 'gourmet_batch_number', label: 'No. Batch Gourmet (opsional)', type: 'text' },
+            { id: 'eg_batch_number', label: 'No. Batch EG (opsional)', type: 'text' },
+            { id: 'ep_batch_number', label: 'No. Batch EP (opsional)', type: 'text' },
+            { id: 'nc_batch_number', label: 'No. Batch NC (opsional)', type: 'text' },
+            { id: 'powder_batch_number', label: 'No. Batch Powder (opsional)', type: 'text' },
             {
                 id: 'process_code', label: 'Jenis Proses — kosongkan = Original', type: 'select',
                 options: [{ value: '00', label: '00 — Original' }, { value: '01', label: '01 — Upgrade' }, { value: '02', label: '02 — Downgrade' }],

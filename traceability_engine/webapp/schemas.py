@@ -171,6 +171,8 @@ class ReceivingCreate(BaseModel):
     on_spec_qty: Optional[Decimal] = None
     off_spec_qty: Optional[Decimal] = None
     smell_test: Optional[str] = None
+    transport_no: Optional[str] = None  # PPH "NO. ANGKUT" -- Fase 23
+    transport_condition: Optional[str] = None  # PPH "KONDISI ANGKUT" -- Fase 23
 
 
 class ReceivingResult(BaseModel):
@@ -194,6 +196,8 @@ class QCTestCreate(BaseModel):
     ka_3: Optional[Decimal] = None
     aw: Optional[Decimal] = None
     finding: Optional[str] = None
+    method_temperature: Optional[Decimal] = None  # KW "METODE SUHU" -- Fase 23
+    product_description: Optional[str] = None  # KW "DESK.I VANILLA" -- Fase 23
 
 
 class MetalDetectionCreate(BaseModel):
@@ -346,6 +350,12 @@ class SortationCreate(BaseModel):
     nc_qty: Optional[Decimal] = None  # "Non Conform" -- sortation.py #2
     powder_qty: Optional[Decimal] = None
     process_code: str = "00"  # "00" Original / "01" Upgrade / "02" Downgrade -- sortation.py #5
+    # Fase 23 -- staff-assigned output batch number per grade, sortation.py #9
+    gourmet_batch_number: Optional[str] = None
+    eg_batch_number: Optional[str] = None
+    ep_batch_number: Optional[str] = None
+    nc_batch_number: Optional[str] = None
+    powder_batch_number: Optional[str] = None
 
 
 class SortationResult(BaseModel):

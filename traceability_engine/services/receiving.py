@@ -93,6 +93,12 @@ class ReceivingInput:
     on_spec_qty: Optional[Decimal] = None
     off_spec_qty: Optional[Decimal] = None
     smell_test: Optional[str] = None
+    # Fase 23 -- PPH sheet (Penerimaan Vanila Hijau, PROSES HIJAU 2026.xlsx)
+    # carries two transport fields the PB field group lacks: NO. ANGKUT
+    # (vehicle plate / courier, e.g. "AA 8520 EE", "PAKET JNT") and KONDISI
+    # ANGKUT. Recorded on notes only, like packaging_condition (#5).
+    transport_no: Optional[str] = None
+    transport_condition: Optional[str] = None
 
 
 def _build_notes(data: ReceivingInput) -> str:
@@ -106,6 +112,8 @@ def _build_notes(data: ReceivingInput) -> str:
         "on_spec_qty": str(data.on_spec_qty) if data.on_spec_qty is not None else None,
         "off_spec_qty": str(data.off_spec_qty) if data.off_spec_qty is not None else None,
         "smell_test": data.smell_test,
+        "transport_no": data.transport_no,
+        "transport_condition": data.transport_condition,
     }
     return json.dumps({k: v for k, v in payload.items() if v is not None}, ensure_ascii=False)
 

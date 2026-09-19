@@ -38,6 +38,8 @@ def create_qc_test(payload: QCTestCreate, db: Session = Depends(get_db)):
         ka_3=payload.ka_3,
         aw=payload.aw,
         finding=payload.finding,
+        method_temperature=payload.method_temperature,
+        product_description=payload.product_description,
     )
     event = record_qc_test(db, data)
     db.flush()

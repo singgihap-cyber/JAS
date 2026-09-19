@@ -37,6 +37,11 @@ def create_sortation(payload: SortationCreate, db: Session = Depends(get_db)):
         nc_qty=payload.nc_qty,
         powder_qty=payload.powder_qty,
         process_code=payload.process_code,
+        gourmet_batch_number=payload.gourmet_batch_number,
+        eg_batch_number=payload.eg_batch_number,
+        ep_batch_number=payload.ep_batch_number,
+        nc_batch_number=payload.nc_batch_number,
+        powder_batch_number=payload.powder_batch_number,
     )
     event = record_sortation(db, data)
     db.flush()

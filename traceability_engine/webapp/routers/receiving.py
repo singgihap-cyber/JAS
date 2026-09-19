@@ -37,6 +37,8 @@ def create_receiving(payload: ReceivingCreate, db: Session = Depends(get_db)):
         on_spec_qty=payload.on_spec_qty,
         off_spec_qty=payload.off_spec_qty,
         smell_test=payload.smell_test,
+        transport_no=payload.transport_no,
+        transport_condition=payload.transport_condition,
     )
     event = record_receiving(db, data)
     db.flush()

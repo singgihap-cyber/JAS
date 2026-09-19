@@ -105,12 +105,21 @@ class QCTestInput:
     ka_3: Optional[Decimal] = None
     aw: Optional[Decimal] = None
     finding: Optional[str] = None  # manual PIC disposition -- never evaluated automatically
+    # Fase 23 -- KW sheet (Uji Kadar Air, PROSES HIJAU 2026.xlsx) also
+    # records the oven method temperature ("METODE SUHU (153 C)") and the
+    # product description ("DESK.I VANILLA": EG/GOURMET). Notes only.
+    method_temperature: Optional[Decimal] = None
+    product_description: Optional[str] = None
 
 
 def _qc_notes(data: QCTestInput) -> Optional[str]:
-    if data.sample_received_date is None:
-        return None
-    return json.dumps({"sample_received_date": data.sample_received_date.isoformat()})
+    payload = {
+        "sample_received_date": data.sample_received_date.isoformat() if data.sample_received_date else None,
+        "method_temperature": str(data.method_temperature) if data.method_temperature is not None else None,
+        "product_description": data.product_description,
+    }
+    payload = {k: v for k, v in payload.items() if v is not None}
+    return json.dumps(payload, ensure_ascii=False) if payload else None
 
 
 def record_qc_test(session: Session, data: QCTestInput) -> ProcessEvent:

@@ -1654,3 +1654,27 @@ def test_hijau_full_chain_over_http(client, supplier_id, pic_id):
         "SUNDRYING",
         "AIRDRYING",
     ]
+
+
+def test_fase23_transport_fields_and_sortation_batch_numbers_via_api(client, supplier_id, pic_id):
+    """Fase 23: PPH transport fields reach ProcessEvent.notes, and SORT's
+    per-grade output batch numbers reach the new Batch rows (parsed
+    components override the inherited ones, sortation.py #9)."""
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-05-05", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_HIJAU", "net_quantity": "77.740", "batch_number": "040018-260505-00",
+        "transport_no": "AA 8520 EE", "transport_condition": "BAIK",
+    })
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert "AA 8520 EE" in body["event"]["notes"]
+    batch_id = body["batch"]["batch_id"]
+
+    r = client.post("/api/sortation", json={
+        "event_date": "2026-06-18", "pic_user_id": pic_id, "batch_id": batch_id,
+        "eg_qty": "11.280", "eg_batch_number": "030218-260618-00",
+    })
+    assert r.status_code == 201, r.text
+    out = r.json()["batches"][0]
+    assert out["batch_number"] == "030218-260618-00"
+    assert out["jenis_code"] == "03" and out["receiving_date"] == "2026-06-18"
