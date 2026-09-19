@@ -110,3 +110,22 @@ def test_supersede_is_manual_and_audited(session, production_manager, staff_user
         session, batch_id=batch_id, actor_user_id=production_manager.user_id, reason="Downgrade via Sortasi"
     )
     assert batch.status == BatchStatus.SUPERSEDED
+
+
+def test_adjustment_needs_no_second_person_approval(session, production_manager, staff_user, supplier):
+    """Fase 29 -- keputusan user 2026-09-19: satu aksi Production Manager
+    cukup untuk ADJUSTMENT. Stok langsung berubah, tidak ada status 'menunggu
+    persetujuan', dan audit log tunggal (ADJUSTMENT_APPROVED) ditulis oleh
+    Manager itu sendiri."""
+    batch_id = _receive(session, staff_user, supplier, Decimal("100.000"))
+    record_adjustment(
+        session,
+        batch_id=batch_id,
+        new_quantity=Decimal("95.000"),
+        actor_user_id=production_manager.user_id,
+        notes="Stok opname",
+        event_date=TODAY,
+    )
+    assert session.get(Batch, batch_id).current_quantity == Decimal("95.000")
+    logs = session.query(AuditLog).filter_by(action=AuditAction.ADJUSTMENT_APPROVED).all()
+    assert len(logs) == 1 and logs[0].actor_user_id == production_manager.user_id

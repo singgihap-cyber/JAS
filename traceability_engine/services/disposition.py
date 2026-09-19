@@ -35,9 +35,10 @@ Keputusan yang diambil di sini (CLAUDE.md rule 11):
 - `[UNCONFIRMED]` batch turunan (hasil sortasi/mixing) mungkin tidak punya
   `supplier_id`; pengembalian TIDAK diblokir untuk kasus itu -- supplier
   dicatat di notes bila ada.
-- `[UNCONFIRMED]` apakah off-spec saat Receiving (kolom `off_spec_qty`, Fase 4)
-  juga harus otomatis memakai alur ini; saat ini belum -- off-spec tetap hanya
-  dicatat, dan batch penuh baru bisa dikembalikan setelah ditandai REJECTED.
+- Off-spec saat Receiving (`off_spec_qty`): DIPUTUSKAN di Fase 29 -- otomatis
+  dicatat sebagai SUPPLIER_RETURN oleh `record_receiving()` (tanpa menandai
+  batch REJECTED, tanpa Production Manager). Alur `return_to_supplier()` di
+  sini tetap untuk batch yang ditandai REJECTED secara manual.
 - Deteksi "dipakai setelah ditolak" membandingkan `ProcessEvent.created_at`
   dengan waktu AuditLog REJECTED (waktu pencatatan, bukan `event_date`).
   Event inspeksi (QC_TEST, METAL_DETECTION), SUPPLIER_RETURN, dan event VOID

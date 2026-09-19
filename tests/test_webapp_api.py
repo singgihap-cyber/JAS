@@ -79,10 +79,10 @@ def test_master_data_roundtrip(client, supplier_id, pic_id):
     assert any(u["user_id"] == pic_id for u in users)
 
 
-def test_receiving_creates_batch_for_full_net_quantity(client, supplier_id, pic_id):
-    """services/receiving.py docstring #4: the WHOLE net quantity becomes
-    one Batch -- on_spec/off_spec are recorded, not split into batches. The
-    API must not silently "fix" this by using on_spec as the batch qty."""
+def test_receiving_creates_batch_and_auto_returns_off_spec(client, supplier_id, pic_id):
+    """services/receiving.py docstring #4 (Fase 29): the WHOLE net quantity
+    is received into one Batch, then off_spec_qty is automatically returned
+    to the supplier (SUPPLIER_RETURN) -- stock left = net - off_spec."""
     r = client.post(
         "/api/receiving",
         json={
@@ -99,7 +99,7 @@ def test_receiving_creates_batch_for_full_net_quantity(client, supplier_id, pic_
     )
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["batch"]["current_quantity"] == "55.500"
+    assert body["batch"]["current_quantity"] == "50.000"  # 55.500 - off-spec 5.500 dikembalikan
     assert body["batch"]["jenis_code"] == "03"  # parsed from batch_number
     assert body["batch"]["grade_code"] == "02"
     assert body["event"]["event_type"] == "RECEIVING"

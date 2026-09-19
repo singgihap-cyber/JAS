@@ -37,8 +37,23 @@ ambiguity instead of guessing):
    "gross/tare/net" being a standard weighing record and net being the
    actual receivable material.
 
-4. **On-spec/off-spec quantities and the smell test result are recorded,
-   not acted on.** Whether an off-spec quantity should be split into a
+4. **[Fase 29 -- DIUBAH] Off-spec otomatis dianggap dikembalikan ke
+   supplier.** Keputusan user 2026-09-19 (AskUserQuestion "Fase 29"): bila
+   `off_spec_qty` > 0, `record_receiving()` langsung mencatat event
+   SUPPLIER_RETURN (stock OUT) sebesar `off_spec_qty` atas batch yang baru
+   dibuat, di transaksi yang sama. Jejaknya utuh: RECEIVING masuk sebesar
+   NETTO penuh, SUPPLIER_RETURN keluar sebesar off-spec, sisa = stok on-spec.
+   Batch TIDAK ditandai REJECTED (hanya bagiannya yang dikembalikan) dan tidak
+   butuh Production Manager (berbeda dari `return_to_supplier()` Fase 26 yang
+   untuk batch REJECTED) -- pengembalian off-spec adalah bagian dari
+   penerimaan itu sendiri, dicatat oleh PIC Receiving. `off_spec_qty` tidak
+   boleh melebihi `net_quantity`. `[UNCONFIRMED]` apakah `on_spec + off_spec`
+   harus = netto (tidak divalidasi; tidak ada sumber yang menetapkannya).
+   Teks lama di bawah (sebelum Fase 29) tetap berlaku untuk `smell_test`
+   dan `on_spec_qty` -- keduanya hanya dicatat.
+
+   *Catatan historis (Fase 4):* **On-spec/off-spec quantities and the smell
+   test result are recorded, not acted on.** Whether an off-spec quantity should be split into a
    second (e.g. REJECTED) batch at receiving time is not confirmed by any
    source document (PROCESS_RULES.md lists "metal detection disposition"
    and similar dispositions as open, and QC/MD have no numeric acceptance
@@ -70,9 +85,9 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from .. import batch_number as batch_number_mod
-from ..enums import BatchType, EventType
+from ..enums import BatchType, EventType, LinkRole
 from ..models import ProcessEvent
-from .events import NewBatchSpec, OutputSpec, record_process_event
+from .events import InputSpec, NewBatchSpec, OutputSpec, record_process_event
 
 
 @dataclass
@@ -125,6 +140,10 @@ def record_receiving(session: Session, data: ReceivingInput) -> ProcessEvent:
     """
     if data.net_quantity <= 0:
         raise ValueError("net_quantity (PB 'net' field) must be positive.")
+    if data.off_spec_qty is not None and data.off_spec_qty < 0:
+        raise ValueError("off_spec_qty cannot be negative.")
+    if data.off_spec_qty is not None and data.off_spec_qty > data.net_quantity:
+        raise ValueError("off_spec_qty cannot exceed net_quantity (PB 'net' field).")
 
     parsed = None
     if data.batch_number:
@@ -146,7 +165,7 @@ def record_receiving(session: Session, data: ReceivingInput) -> ProcessEvent:
         created_by=data.pic_user_id,
     )
 
-    return record_process_event(
+    event = record_process_event(
         session,
         event_type=EventType.RECEIVING,
         event_date=data.event_date,
@@ -156,3 +175,28 @@ def record_receiving(session: Session, data: ReceivingInput) -> ProcessEvent:
         outputs=[OutputSpec(quantity=data.net_quantity, unit=data.unit, new_batch=new_batch)],
         notes=_build_notes(data),
     )
+
+    if data.off_spec_qty is not None and data.off_spec_qty > 0:
+        # Fase 29 -- off-spec dianggap langsung dikembalikan ke supplier (#4).
+        batch = next(l.batch for l in event.links if l.role == LinkRole.OUTPUT)
+        supplier = batch.supplier
+        record_process_event(
+            session,
+            event_type=EventType.SUPPLIER_RETURN,
+            event_date=data.event_date,
+            event_time=data.event_time,
+            pic_user_id=data.pic_user_id,
+            inputs=[InputSpec(batch_id=batch.batch_id, quantity=data.off_spec_qty, unit=data.unit)],
+            outputs=[],
+            notes=json.dumps(
+                {
+                    "reason": "Off-spec saat Receiving (otomatis dikembalikan ke supplier)",
+                    "source": "RECEIVING_OFF_SPEC",
+                    "receiving_event_id": event.event_id,
+                    "supplier_id": batch.supplier_id,
+                    "supplier_name": supplier.name if supplier is not None else None,
+                },
+                ensure_ascii=False,
+            ),
+        )
+    return event
