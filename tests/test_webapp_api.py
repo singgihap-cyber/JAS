@@ -1706,7 +1706,7 @@ def test_rendemen_sortation_endpoints(client, supplier_id, pic_id):
 
 
 def test_date_order_audit_endpoint(client, supplier_id, pic_id):
-    """Fase 25: audit urutan tanggal -- kosong bila konsisten, terisi bila terbalik."""
+    """Fase 25/25b: urutan tanggal terbalik diblokir default; audit kosong bila konsisten."""
     r = client.post("/api/receiving", json={
         "event_date": "2026-06-18", "pic_user_id": pic_id, "supplier_id": supplier_id,
         "batch_type": "RAW_HIJAU", "net_quantity": "10.000"})
@@ -1715,11 +1715,17 @@ def test_date_order_audit_endpoint(client, supplier_id, pic_id):
     s = client.post("/api/sortation", json={
         "event_date": "2026-06-15", "pic_user_id": pic_id, "batch_id": src,
         "initial_qty": "10.000", "eg_qty": "2.000"})
-    assert s.status_code == 201, s.text  # default: tidak diblokir
-    rows = client.get("/api/audit/date-order").json()
-    assert len(rows) == 1 and rows[0]["batch_id"] == src and rows[0]["days_early"] == 3
-    assert rows[0]["prior_event_type"] == "RECEIVING" and "lebih awal" in rows[0]["message"]
+    # Fase 25b: default = blokir (422, detail "lebih awal N hari"), tidak ada yang tersimpan.
+    assert s.status_code == 422, s.text
+    assert "lebih awal 3 hari" in s.json()["detail"]
+    assert client.get("/api/audit/date-order").json() == []
     assert client.get("/api/audit/date-order", params={"batch_id": 999}).json() == []
+    # Sortasi dicatat dengan tanggal MULAI yang benar -> lolos, audit bersih.
+    ok = client.post("/api/sortation", json={
+        "event_date": "2026-06-18", "pic_user_id": pic_id, "batch_id": src,
+        "initial_qty": "10.000", "eg_qty": "2.000"})
+    assert ok.status_code == 201, ok.text
+    assert client.get("/api/audit/date-order").json() == []
 
 
 def test_supplier_return_and_disposition_audit_endpoints(client, supplier_id, pic_id, pm_id):

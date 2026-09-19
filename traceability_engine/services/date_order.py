@@ -9,16 +9,16 @@ GENEALOGY.md §5.2) dan event VOID diabaikan.
 Temuan pemicu (Fase 23, poin c): tanggal KW/MD batch `030218-260618-00` = 15/6
 padahal batch baru ada lewat sortasi 18/6.
 
-Keputusan (CLAUDE.md rule 11) -- `[UNCONFIRMED]` apakah PT JAS ingin urutan
-tanggal yang salah DIBLOKIR atau hanya DILAPORKAN. Data historis nyata memang
-memuat urutan terbalik, jadi blokir keras di mana-mana akan menolak entri
-riwayat yang sah. Karena itu:
+Keputusan user 2026-09-19 (Fase 25b): tanggal yang salah DIBLOKIR secara
+default. Data historis nyata memang bisa memuat urutan yang sah (MD dilakukan
+sebelum sortasi selesai) -- itu dicatat dengan sortasi `event_date` = tanggal
+MULAI, bukan tanggal selesai (claude/27_KONFIRMASI_USER.md). Untuk entri
+riwayat yang memang terbalik ada jalur keluar eksplisit.
 
-- `audit_date_order()` -- read-only, melaporkan semua pelanggaran pada data
-  yang sudah tersimpan (default, tidak mengubah perilaku apa pun).
+- `audit_date_order()` -- read-only, melaporkan pelanggaran pada data tersimpan.
 - `check_event_date_order()` -- pemeriksaan sebelum event direkam.
-- `record_process_event(..., strict_date_order=True)` -- opt-in: menolak event
-  dengan `EventDateOrderError`. Default `False` = perilaku lama tidak berubah.
+- `record_process_event(..., strict_date_order=True)` -- DEFAULT: menolak event
+  dengan `EventDateOrderError`; `strict_date_order=False` = opt-out.
 
 Tanpa skema baru; semuanya diturunkan dari ProcessEvent + EventBatchLink.
 """

@@ -52,9 +52,9 @@ class StockReconciliationError(TraceabilityError):
 
 class EventDateOrderError(TraceabilityError):
     """Tanggal event lebih awal daripada event yang sudah tercatat pada batch
-    yang sama (Fase 25, services/date_order.py). Hanya dilempar bila pemanggil
-    meminta `strict_date_order=True`; `[UNCONFIRMED]` apakah PT JAS ingin
-    pemeriksaan ini menjadi blokir default."""
+    yang sama (Fase 25, services/date_order.py). Blokir DEFAULT sejak Fase 25b
+    (keputusan user 2026-09-19); entri riwayat memakai
+    `strict_date_order=False`."""
 
 
 class UnauthorizedDispositionError(TraceabilityError):

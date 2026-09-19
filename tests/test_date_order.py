@@ -44,7 +44,8 @@ def test_consistent_order_has_no_violations(session, staff_user, supplier):
 
 def test_real_case_event_before_batch_creation_is_reported(session, staff_user, supplier):
     b = _batch(session, staff_user.user_id, supplier)
-    ev = _selfloop(session, staff_user.user_id, b, dt.date(2026, 6, 15))  # 15/6 < 18/6
+    ev = _selfloop(session, staff_user.user_id, b, dt.date(2026, 6, 15),
+                   strict_date_order=False)  # data historis: 15/6 < 18/6
     [v] = audit_date_order(session)
     assert v.batch_id == b.batch_id and v.event_id == ev.event_id
     assert v.days_early == 3 and v.prior_event_type == "RECEIVING"
@@ -54,10 +55,18 @@ def test_real_case_event_before_batch_creation_is_reported(session, staff_user, 
     assert audit_date_order(session, batch_id=999) == []
 
 
-def test_default_does_not_block_backdated_event(session, staff_user, supplier):
-    """Default = perilaku lama: event tetap terekam (data historis sah)."""
+def test_default_blocks_backdated_event(session, staff_user, supplier):
+    """Fase 25b (keputusan user 2026-09-19): default = blokir."""
     b = _batch(session, staff_user.user_id, supplier)
-    ev = _selfloop(session, staff_user.user_id, b, dt.date(2026, 6, 15))
+    with pytest.raises(EventDateOrderError, match="lebih awal 3 hari"):
+        _selfloop(session, staff_user.user_id, b, dt.date(2026, 6, 15))
+
+
+def test_opt_out_records_backdated_event(session, staff_user, supplier):
+    """Jalur keluar eksplisit untuk entri riwayat: strict_date_order=False."""
+    b = _batch(session, staff_user.user_id, supplier)
+    ev = _selfloop(session, staff_user.user_id, b, dt.date(2026, 6, 15),
+                   strict_date_order=False)
     assert ev.event_id is not None
 
 
@@ -98,13 +107,15 @@ def test_void_events_are_ignored(session, staff_user, supplier):
     assert audit_date_order(session) == []
 
 
-def test_qc_via_service_default_unaffected(session, staff_user, supplier):
-    """QC (self-loop inspeksi) berlabel tanggal sebelum batch tetap terekam
-    dan muncul di audit -- meniru temuan KW/MD 23c."""
+def test_qc_via_service_default_blocks_backdated(session, staff_user, supplier):
+    """QC (self-loop inspeksi) berlabel tanggal sebelum batch DITOLAK secara
+    default (Fase 25b). Kasus nyata 23c sah bila sortasi dicatat dengan
+    tanggal MULAI (<= tanggal MD), bukan tanggal selesai."""
     uid = staff_user.user_id
     b = _batch(session, uid, supplier)
-    record_qc_test(session, QCTestInput(
-        event_date=dt.date(2026, 6, 15), pic_user_id=uid, batch_id=b.batch_id,
-        stage=QCStage.RM, ka_1=D("20"), aw=D("0.6")))
-    [v] = audit_date_order(session)
-    assert v.event_type == "QC_TEST" and v.days_early == 3
+    with pytest.raises(EventDateOrderError):
+        record_qc_test(session, QCTestInput(
+            event_date=dt.date(2026, 6, 15), pic_user_id=uid, batch_id=b.batch_id,
+            stage=QCStage.RM, ka_1=D("20"), aw=D("0.6")))
+    assert audit_date_order(session) == []
+

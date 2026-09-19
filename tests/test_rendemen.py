@@ -164,12 +164,12 @@ def test_list_filters_by_batch_and_date(session, staff_user, supplier):
     uid = staff_user.user_id
     g1, g2 = _green(session, uid, supplier, D("10")), _green(session, uid, supplier, D("20"))
     e1 = record_sortation(session, SortationInput(
-        event_date=dt.date(2026, 6, 1), pic_user_id=uid, batch_id=g1.batch_id, eg_qty=D("10")))
+        event_date=dt.date(2026, 6, 20), pic_user_id=uid, batch_id=g1.batch_id, eg_qty=D("10")))
     e2 = record_sortation(session, SortationInput(
         event_date=dt.date(2026, 7, 1), pic_user_id=uid, batch_id=g2.batch_id, eg_qty=D("20")))
     assert [r.event_id for r in list_sortation_rendemen(session)] == [e1.event_id, e2.event_id]
     assert [r.event_id for r in list_sortation_rendemen(session, batch_id=g2.batch_id)] == [e2.event_id]
     out1 = sortation_rendemen(session, e1.event_id).outputs[0].batch_id
     assert [r.event_id for r in list_sortation_rendemen(session, batch_id=out1)] == [e1.event_id]
-    assert [r.event_id for r in list_sortation_rendemen(session, date_from=dt.date(2026, 6, 15))] == [e2.event_id]
-    assert [r.event_id for r in list_sortation_rendemen(session, date_to=dt.date(2026, 6, 15))] == [e1.event_id]
+    assert [r.event_id for r in list_sortation_rendemen(session, date_from=dt.date(2026, 6, 25))] == [e2.event_id]
+    assert [r.event_id for r in list_sortation_rendemen(session, date_to=dt.date(2026, 6, 25))] == [e1.event_id]
