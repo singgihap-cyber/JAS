@@ -711,3 +711,29 @@ class DateOrderViolationOut(BaseModel):
     prior_event_date: dt.date
     days_early: int
     message: str
+
+
+# ------------------------------------------- disposisi REJECTED (Fase 26)
+class SupplierReturnCreate(BaseModel):
+    event_date: dt.date
+    event_time: Optional[dt.time] = None
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server, services/disposition.py
+    reason: str = Field(..., min_length=1)
+    quantity: Optional[Decimal] = None  # kosong = seluruh stok batch
+
+
+class DispositionRowOut(BaseModel):
+    """Mirrors services/disposition.py `DispositionRow` field-for-field."""
+
+    batch_id: int
+    batch_number: Optional[str] = None
+    supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
+    rejected_at: Optional[dt.datetime] = None
+    reject_reason: Optional[str] = None
+    quantity_on_hand: Decimal
+    returned_quantity: Decimal
+    disposition: str
+    return_event_ids: list[int]
+    used_after_rejection_event_ids: list[int]
+    message: str

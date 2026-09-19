@@ -23,6 +23,7 @@ from ..exceptions import (
     QuantityReconciliationError,
     TraceabilityError,
     UnauthorizedAdjustmentError,
+    UnauthorizedDispositionError,
 )
 from .database import init_db
 from .routers import (
@@ -37,6 +38,7 @@ from .routers import (
     receiving,
     rendemen,
     date_order,
+    disposition,
     rework,
     sortation,
     steam_dry,
@@ -83,6 +85,11 @@ async def _unauthorized_handler(request: Request, exc: UnauthorizedAdjustmentErr
     return _error_response(403, "unauthorized_adjustment", exc)
 
 
+@app.exception_handler(UnauthorizedDispositionError)
+async def _unauthorized_disposition_handler(request: Request, exc: UnauthorizedDispositionError):
+    return _error_response(403, "unauthorized_disposition", exc)
+
+
 @app.exception_handler(TraceabilityError)
 async def _domain_handler(request: Request, exc: TraceabilityError):
     return _error_response(422, "domain_error", exc)
@@ -113,6 +120,7 @@ app.include_router(stock.router, prefix=api_prefix)
 app.include_router(traceability.router, prefix=api_prefix)
 app.include_router(rendemen.router, prefix=api_prefix)
 app.include_router(date_order.router, prefix=api_prefix)
+app.include_router(disposition.router, prefix=api_prefix)
 app.include_router(batches.router, prefix=api_prefix)
 
 _static_dir = Path(__file__).parent / "static"

@@ -60,6 +60,9 @@ class EventType(str, enum.Enum):
     REWORK = "REWORK"
     DELIVERY = "DELIVERY"
     SAMPLE_DELIVERY = "SAMPLE_DELIVERY"
+    # Fase 26 -- disposisi batch REJECTED: dikembalikan ke supplier (stock OUT,
+    # tanpa batch output). Lihat services/disposition.py.
+    SUPPLIER_RETURN = "SUPPLIER_RETURN"
     ADJUSTMENT = "ADJUSTMENT"
 
 
@@ -67,7 +70,9 @@ class EventType(str, enum.Enum):
 NO_INPUT_EVENT_TYPES = frozenset({EventType.RECEIVING})
 
 # Event types with no OUTPUT batch (batch -> external / stock-out).
-NO_OUTPUT_EVENT_TYPES = frozenset({EventType.DELIVERY, EventType.SAMPLE_DELIVERY})
+NO_OUTPUT_EVENT_TYPES = frozenset(
+    {EventType.DELIVERY, EventType.SAMPLE_DELIVERY, EventType.SUPPLIER_RETURN}
+)
 
 # ADJUSTMENT does not go through record_process_event() at all (GENEALOGY.md
 # §5.2) -- it has its own gated path, record_adjustment().

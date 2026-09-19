@@ -1720,3 +1720,29 @@ def test_date_order_audit_endpoint(client, supplier_id, pic_id):
     assert len(rows) == 1 and rows[0]["batch_id"] == src and rows[0]["days_early"] == 3
     assert rows[0]["prior_event_type"] == "RECEIVING" and "lebih awal" in rows[0]["message"]
     assert client.get("/api/audit/date-order", params={"batch_id": 999}).json() == []
+
+
+def test_supplier_return_and_disposition_audit_endpoints(client, supplier_id, pic_id, pm_id):
+    """Fase 26: batch REJECTED dikembalikan ke supplier (PM saja); audit = laporan."""
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-06-18", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "10.000"})
+    b = r.json()["batch"]["batch_id"]
+    body = {"event_date": "2026-06-20", "reason": "Ditolak MD1", "actor_user_id": pm_id}
+    assert client.get("/api/audit/disposition").json() == []
+    # Belum REJECTED -> 422
+    assert client.post(f"/api/batches/{b}/return-to-supplier", json=body).status_code == 422
+    assert client.post(f"/api/batches/{b}/reject", json={"actor_user_id": pic_id, "reason": "logam"}).status_code == 200
+    rows = client.get("/api/audit/disposition").json()
+    assert len(rows) == 1 and rows[0]["disposition"] == "PENDING_RETURN" and rows[0]["supplier_name"] == "WARDOYO"
+    # STAFF -> 403
+    denied = client.post(f"/api/batches/{b}/return-to-supplier", json={**body, "actor_user_id": pic_id})
+    assert denied.status_code == 403 and denied.json()["error"] == "unauthorized_disposition"
+    assert client.post("/api/batches/999/return-to-supplier", json=body).status_code == 404
+    ok = client.post(f"/api/batches/{b}/return-to-supplier", json={**body, "quantity": "4.000"})
+    assert ok.status_code == 201 and ok.json()["event_type"] == "SUPPLIER_RETURN"
+    assert client.get("/api/audit/disposition").json()[0]["disposition"] == "PARTIALLY_RETURNED"
+    assert client.post(f"/api/batches/{b}/return-to-supplier", json=body).status_code == 201
+    row = client.get("/api/audit/disposition", params={"batch_id": b}).json()[0]
+    assert row["disposition"] == "RETURNED" and row["returned_quantity"] == "10.000"
+    assert client.get("/api/audit/disposition", params={"batch_id": 999}).json() == []

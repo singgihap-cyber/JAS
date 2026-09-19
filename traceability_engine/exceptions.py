@@ -55,3 +55,8 @@ class EventDateOrderError(TraceabilityError):
     yang sama (Fase 25, services/date_order.py). Hanya dilempar bila pemanggil
     meminta `strict_date_order=True`; `[UNCONFIRMED]` apakah PT JAS ingin
     pemeriksaan ini menjadi blokir default."""
+
+
+class UnauthorizedDispositionError(TraceabilityError):
+    """Hanya User dengan role PRODUCTION_MANAGER yang boleh memutuskan
+    disposisi batch REJECTED (Fase 26, dikonfirmasi user 2026-09-19)."""
