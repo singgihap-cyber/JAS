@@ -710,6 +710,7 @@ class DateOrderViolationOut(BaseModel):
     prior_event_type: str
     prior_event_date: dt.date
     days_early: int
+    exempt: bool = False
     message: str
 
 

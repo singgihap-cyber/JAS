@@ -20,6 +20,13 @@ riwayat yang memang terbalik ada jalur keluar eksplisit.
 - `record_process_event(..., strict_date_order=True)` -- DEFAULT: menolak event
   dengan `EventDateOrderError`; `strict_date_order=False` = opt-out.
 
+Pengecualian batch lama (keputusan user 2026-09-19): batch yang SUDAH terlanjur
+dicatat salah sejak awal tetap dikecualikan agar datanya konsisten sampai batch
+itu keluar (`LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS`). Batch baru TIDAK BOLEH
+terlanjur lagi -- tanpa pengecualian. Batch yang dikecualikan tetap muncul di
+audit dengan `exempt=True` (catatan, bukan blokir). Hapus nomor dari daftar
+begitu batch itu sudah keluar.
+
 Tanpa skema baru; semuanya diturunkan dari ProcessEvent + EventBatchLink.
 """
 from __future__ import annotations
@@ -35,6 +42,11 @@ from ..exceptions import EventDateOrderError
 from ..models import Batch, EventBatchLink, ProcessEvent
 
 
+# Batch lama yang terlanjur salah sejak awal: MD 15/6 dicatat sebelum sortasi
+# (tercatat 18/6 = tanggal selesai). Konsisten sampai batch keluar, lalu hapus.
+LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS: frozenset[str] = frozenset({"030218-260618-00"})
+
+
 @dataclass
 class DateOrderViolation:
     batch_id: int
@@ -46,6 +58,7 @@ class DateOrderViolation:
     prior_event_type: str
     prior_event_date: dt.date
     days_early: int
+    exempt: bool = False  # batch lama yang dikecualikan (bukan blokir)
 
     def message(self) -> str:
         return (
@@ -112,6 +125,7 @@ def audit_date_order(
     nums = _batch_numbers(session, {v.batch_id for v in out})
     for v in out:
         v.batch_number = nums.get(v.batch_id)
+        v.exempt = v.batch_number in LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS
     return out
 
 
@@ -135,6 +149,7 @@ def check_event_date_order(
             prior_event_type=prior.event_type.value,
             prior_event_date=prior.event_date,
             days_early=(prior.event_date - event_date).days,
+            exempt=nums.get(bid) in LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS,
         )
         for bid, prior in sorted(latest.items())
         if event_date < prior.event_date
@@ -144,6 +159,8 @@ def check_event_date_order(
 def enforce_event_date_order(
     session: Session, event_date: dt.date, batch_ids: Iterable[int]
 ) -> None:
-    violations = check_event_date_order(session, event_date, batch_ids)
+    violations = [
+        v for v in check_event_date_order(session, event_date, batch_ids) if not v.exempt
+    ]
     if violations:
         raise EventDateOrderError("; ".join(v.message() for v in violations))

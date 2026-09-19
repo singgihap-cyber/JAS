@@ -119,3 +119,27 @@ def test_qc_via_service_default_blocks_backdated(session, staff_user, supplier):
             stage=QCStage.RM, ka_1=D("20"), aw=D("0.6")))
     assert audit_date_order(session) == []
 
+
+
+def test_legacy_batch_is_exempt_but_still_audited(session, staff_user, supplier):
+    """Keputusan user 2026-09-19: batch lama 030218-260618-00 (terlanjur salah
+    sejak awal) konsisten sampai keluar; batch lain tetap diblokir."""
+    from traceability_engine.services.date_order import (
+        LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS as EX,
+    )
+    assert "030218-260618-00" in EX
+    uid = staff_user.user_id
+    ev = record_receiving(session, ReceivingInput(
+        event_date=D18, pic_user_id=uid, supplier_id=supplier.supplier_id,
+        batch_type=BatchType.RAW_HIJAU, net_quantity=D("10"),
+        batch_number="030218-260618-00"))
+    legacy = session.query(Batch).filter_by(created_from_event_id=ev.event_id).one()
+    other = _batch(session, uid, supplier)
+    md = dt.date(2026, 6, 15)
+    _selfloop(session, uid, legacy, md)  # lolos: dikecualikan
+    with pytest.raises(EventDateOrderError):  # batch baru tetap diblokir
+        _selfloop(session, uid, other, md)
+    [v] = audit_date_order(session)
+    assert v.batch_id == legacy.batch_id and v.exempt is True
+    [c] = check_event_date_order(session, dt.date(2026, 6, 10), [legacy.batch_id])
+    assert c.exempt is True
