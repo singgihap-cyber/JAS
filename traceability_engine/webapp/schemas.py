@@ -695,3 +695,19 @@ class SortationRendemenOut(BaseModel):
     yield_percent: Optional[Decimal] = None
     complete: bool
     outputs: list[SortationOutputOut] = []
+
+
+# ------------------------------------------------- urutan tanggal (Fase 25)
+class DateOrderViolationOut(BaseModel):
+    """Mirrors services/date_order.py `DateOrderViolation` field-for-field."""
+
+    batch_id: int
+    batch_number: Optional[str] = None
+    event_id: Optional[int] = None
+    event_type: Optional[str] = None
+    event_date: dt.date
+    prior_event_id: int
+    prior_event_type: str
+    prior_event_date: dt.date
+    days_early: int
+    message: str

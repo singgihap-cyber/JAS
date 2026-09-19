@@ -152,15 +152,25 @@ def record_process_event(
     loss_qty: Decimal = ZERO,
     notes: Optional[str] = None,
     created_by: Optional[int] = None,
+    strict_date_order: bool = False,
 ) -> ProcessEvent:
     """Record any non-ADJUSTMENT process event and its stock-ledger side
     effects. Raises InvalidEventStructureError / QuantityReconciliationError
-    / InsufficientStockError on violation; nothing is persisted (session is
+    / InsufficientStockError (and, only with strict_date_order=True,
+    EventDateOrderError) on violation; nothing is persisted (session is
     not committed here -- caller controls the transaction boundary) beyond
     what SQLAlchemy has already flushed for FK resolution.
     """
     _validate_structure(event_type, inputs, outputs)
     _check_reconciliation(event_type, inputs, outputs, shrinkage_qty, loss_qty)
+
+    if strict_date_order:  # Fase 25, opt-in -- lihat services/date_order.py
+        from .date_order import enforce_event_date_order
+
+        touched_ids = {i.batch_id for i in inputs} | {
+            o.batch_id for o in outputs if o.batch_id is not None
+        }
+        enforce_event_date_order(session, event_date, touched_ids)
 
     event = ProcessEvent(
         event_type=event_type,

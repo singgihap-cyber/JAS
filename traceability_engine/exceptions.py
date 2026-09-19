@@ -48,3 +48,10 @@ class StockReconciliationError(TraceabilityError):
     with the StockTransaction rows they write; a mismatch means something
     bypassed the ledger (13_STOCK.md: "do not manually overwrite current
     stock")."""
+
+
+class EventDateOrderError(TraceabilityError):
+    """Tanggal event lebih awal daripada event yang sudah tercatat pada batch
+    yang sama (Fase 25, services/date_order.py). Hanya dilempar bila pemanggil
+    meminta `strict_date_order=True`; `[UNCONFIRMED]` apakah PT JAS ingin
+    pemeriksaan ini menjadi blokir default."""

@@ -1703,3 +1703,20 @@ def test_rendemen_sortation_endpoints(client, supplier_id, pic_id):
     assert len(client.get("/api/rendemen/sortation", params={"batch_id": src}).json()) == 1
     assert client.get("/api/rendemen/sortation", params={"batch_id": 999}).json() == []
     assert client.get("/api/rendemen/sortation/9999").status_code == 404
+
+
+def test_date_order_audit_endpoint(client, supplier_id, pic_id):
+    """Fase 25: audit urutan tanggal -- kosong bila konsisten, terisi bila terbalik."""
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-06-18", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_HIJAU", "net_quantity": "10.000"})
+    src = r.json()["batch"]["batch_id"]
+    assert client.get("/api/audit/date-order").json() == []
+    s = client.post("/api/sortation", json={
+        "event_date": "2026-06-15", "pic_user_id": pic_id, "batch_id": src,
+        "initial_qty": "10.000", "eg_qty": "2.000"})
+    assert s.status_code == 201, s.text  # default: tidak diblokir
+    rows = client.get("/api/audit/date-order").json()
+    assert len(rows) == 1 and rows[0]["batch_id"] == src and rows[0]["days_early"] == 3
+    assert rows[0]["prior_event_type"] == "RECEIVING" and "lebih awal" in rows[0]["message"]
+    assert client.get("/api/audit/date-order", params={"batch_id": 999}).json() == []
