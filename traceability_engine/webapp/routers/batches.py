@@ -92,6 +92,8 @@ def parse_batch_number(value: str = Query(..., min_length=1)):
     return {
         "ok": True,
         "jenis_code": parsed.jenis_code,
+        "jenis_label": parsed.jenis_label,
+        "jenis_is_legacy": parsed.jenis_is_legacy,
         "grade_code": parsed.grade_code,
         "supplier_code": parsed.supplier_code,
         "supplier_code_width": parsed.supplier_code_width,

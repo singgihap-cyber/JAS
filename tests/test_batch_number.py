@@ -43,3 +43,31 @@ def test_generate_is_not_implemented():
     AA (Jenis) segment is confirmed. This must keep failing loudly."""
     with pytest.raises(BatchNumberNotImplementedError):
         batch_number.generate()
+
+
+def test_jenis_official_codes_are_two():
+    """Fase 30: hanya dua jenis resmi, 01 Tahitensis dan 02 Planifolia."""
+    assert batch_number.JENIS_CODES == {"01": "Tahitensis", "02": "Planifolia"}
+    c = batch_number.parse("0102018-260921-00")
+    assert (c.jenis_label, c.jenis_is_legacy) == ("Tahitensis", False)
+    c = batch_number.parse("0200018-260921-00")  # Hijau = grade 00, jenis Planifolia
+    assert (c.jenis_label, c.jenis_is_legacy, c.grade_code) == ("Planifolia", False, "00")
+
+
+def test_jenis_legacy_codes_still_parse_but_flagged():
+    """Riwayat 03 (Planifolia lama) dan 04 (intake Hijau lama) tetap terbaca."""
+    c = batch_number.parse("030224-260221-00")
+    assert c.jenis_is_legacy and c.jenis_label.startswith("Planifolia")
+    c = batch_number.parse("040018-260505-00")
+    assert c.jenis_is_legacy and c.jenis_label.startswith("Hijau")
+    assert c.grade_code == "00"
+
+
+def test_jenis_unknown_code_parses_without_label():
+    c = batch_number.parse("090224-260221-00")
+    assert c.jenis_label is None and not c.jenis_is_legacy
+
+
+def test_hijau_is_grade_not_jenis():
+    assert "00" not in batch_number.JENIS_CODES
+    assert batch_number.BB_TO_GRADE_MASTER["00"] == 0

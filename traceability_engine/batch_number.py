@@ -1,4 +1,5 @@
-"""Batch-number parsing (NOT generation) -- see BATCH_NUMBER_SPEC.md.
+"""Batch-number parsing (NOT generation; Fase 30: AA/Jenis now confirmed,
+generator still not opened -- parser/validator scope only) -- see BATCH_NUMBER_SPEC.md.
 
 Format:
     Historical (2-digit supplier): [AA][BB][CC]-[YYMMDD]-[PP]   e.g. 030224-260221-00
@@ -30,6 +31,21 @@ from .exceptions import BatchNumberNotImplementedError
 GRADE_MASTER_TO_BB = {10: "01", 20: "02", 30: "03", 40: "04", 50: "05", 60: "06", 0: "00"}
 BB_TO_GRADE_MASTER = {v: k for k, v in GRADE_MASTER_TO_BB.items()}
 
+# Jenis (AA) -- CONFIRMED by PT JAS (Tommy, 2026-09-21, Fase 30): hanya ada
+# DUA jenis, 01 = Tahitensis, 02 = Planifolia. "Hijau" adalah GRADE (BB=00),
+# bukan jenis; batch hijau bisa Tahitensis atau Planifolia.
+JENIS_CODES = {"01": "Tahitensis", "02": "Planifolia"}
+
+# Kode AA lama yang muncul di data riwayat (123 sampel) tetapi BUKAN kode
+# jenis resmi. Parser tetap menerimanya apa adanya (tidak menulis ulang
+# riwayat); generator batch baru tidak boleh memakainya.
+#   03 -> dipakai 61 batch, dibaca sebagai Planifolia (label staf lama)
+#   04 -> dipakai 12 batch intake Hijau (BB=00); jenis sebenarnya tidak diketahui
+LEGACY_JENIS_CODES = {
+    "03": "Planifolia (kode lama)",
+    "04": "Hijau (kode lama; jenis tidak diketahui)",
+}
+
 # "Ongoing Grading" / process-history code -- BATCH_NUMBER_SPEC.md, all 5
 # confirmed real and in use by PT JAS (2026-09-14).
 PROCESS_CODES = {
@@ -44,12 +60,22 @@ PROCESS_CODES = {
 @dataclass(frozen=True)
 class BatchNumberComponents:
     raw: str
-    jenis_code: str  # AA -- [UNCONFIRMED] meaning, see BATCH_NUMBER_SPEC.md
+    jenis_code: str  # AA -- 01 Tahitensis / 02 Planifolia (Fase 30); 03/04 = legacy
     grade_code: str  # BB, batch-number-internal (Grade Master / 10) encoding
     supplier_code: str  # CC or CCC, un-padded numeric string preserved as given
     supplier_code_width: int  # 2 (historical) or 3 (new, from 2026-09-14)
     receiving_date: dt.date
     process_code: str  # PP
+
+    @property
+    def jenis_label(self) -> Optional[str]:
+        """Nama jenis untuk AA; None bila kode tak dikenal sama sekali."""
+        return JENIS_CODES.get(self.jenis_code) or LEGACY_JENIS_CODES.get(self.jenis_code)
+
+    @property
+    def jenis_is_legacy(self) -> bool:
+        """True bila AA adalah kode lama (03/04) yang hanya valid untuk riwayat."""
+        return self.jenis_code in LEGACY_JENIS_CODES
 
 
 def parse(batch_number: str) -> BatchNumberComponents:
