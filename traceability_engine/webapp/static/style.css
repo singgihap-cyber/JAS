@@ -105,7 +105,7 @@ td { padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12.5px; 
     position: fixed; bottom: 22px; right: 22px; z-index: 9999;
     display: flex; flex-direction: column; gap: 8px;
 }
-.toast {
+.toast { white-space: pre-line;
     padding: 11px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.2); max-width: 340px; color: #fff;
 }

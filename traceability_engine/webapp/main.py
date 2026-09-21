@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..exceptions import (
+    EventDateOrderError,
     InsufficientStockError,
     InvalidEventStructureError,
     QuantityReconciliationError,
@@ -88,6 +89,23 @@ async def _unauthorized_handler(request: Request, exc: UnauthorizedAdjustmentErr
 @app.exception_handler(UnauthorizedDispositionError)
 async def _unauthorized_disposition_handler(request: Request, exc: UnauthorizedDispositionError):
     return _error_response(403, "unauthorized_disposition", exc)
+
+
+@app.exception_handler(EventDateOrderError)
+async def _date_order_handler(request: Request, exc: EventDateOrderError):
+    # Fase 35: kode galat khusus + petunjuk agar UI bisa menampilkan pesan
+    # yang jelas. Status tetap 422 (sama seperti sebelumnya, subclass
+    # TraceabilityError). Bukan aturan baru, hanya pembungkus pesan.
+    return JSONResponse(status_code=422, content={
+        "error": "event_date_order_error",
+        "detail": str(exc),
+        "hint": (
+            "Tanggal event tidak boleh lebih awal dari event yang sudah tercatat "
+            "pada batch yang sama. Periksa kembali tanggalnya; untuk Sortasi, "
+            "tanggal utama harus tanggal MULAI sortasi (tanggal selesai diisi "
+            "di kolom 'Tanggal Selesai')."
+        ),
+    })
 
 
 @app.exception_handler(TraceabilityError)

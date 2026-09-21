@@ -704,8 +704,8 @@ class SortationOutputOut(BaseModel):
 
 class SortationRendemenOut(BaseModel):
     """Mirrors services/rendemen.py `SortationRendemen` field-for-field.
-    `rendemen` is the SORT sheet's ratio (kg raw per kg sorted), not a
-    percent; `raw_weight`/`rendemen` are null when lineage is incomplete."""
+    `rendemen` is the SORT sheet's ratio (kg raw per kg FED INTO the
+    sortation since Fase 35, was per kg output), not a percent; `raw_weight`/`rendemen` are null when lineage is incomplete."""
 
     event_id: int
     event_date: dt.date
@@ -719,6 +719,30 @@ class SortationRendemenOut(BaseModel):
     yield_percent: Optional[Decimal] = None
     complete: bool
     outputs: list[SortationOutputOut] = []
+
+
+class MixingSourceRowOut(BaseModel):
+    batch_id: int
+    batch_number: Optional[str] = None
+    quantity: Decimal
+
+
+class MixingRendemenOut(BaseModel):
+    """Mirrors services/rendemen.py `MixingRendemen` field-for-field (Fase 35).
+    `rendemen` = output / total input sumber (fraksi, <= 1 bila ada susut);
+    arahnya kebalikan dari rendemen Sortasi."""
+
+    event_id: int
+    event_date: dt.date
+    input_quantity: Decimal
+    output_quantity: Decimal
+    shrinkage_qty: Decimal
+    rendemen: Optional[Decimal] = None
+    yield_percent: Optional[Decimal] = None
+    output_batch_id: Optional[int] = None
+    output_batch_number: Optional[str] = None
+    source_count: int
+    sources: list[MixingSourceRowOut] = []
 
 
 # ------------------------------------------------- urutan tanggal (Fase 25)

@@ -10,18 +10,20 @@ sorted output --
 
 The genealogy already holds both numbers, so nothing new is stored:
 the numerator is walked backward from the sortation's input batch to the
-RECEIVING event(s) that created its ancestors; the denominator is the sum of
-the sortation's OUTPUT links (the sheet's `TOTAL (KG)`).
+RECEIVING event(s) that created its ancestors; the denominator is the
+sortation's INPUT quantity (Fase 35; before that it was the sum of the
+OUTPUT links, the sheet's `TOTAL (KG)` -- identical whenever shrinkage is 0).
 
 Decisions (CLAUDE.md rule 11: document ambiguity instead of guessing):
 
 1. **Numerator = received net weight (PPH `NETTO`), before Lepas Tangkai.**
    Matches the sheet (77.74, not the 75.44 left after stem removal).
-2. **Denominator = sum of the sortation's OUTPUT quantities** (the sheet's
-   TOTAL). In every real row TOTAL == input weight (shrinkage 0), so the
-   choice does not matter for the known data; if a sortation ever loses
-   weight, `[UNCONFIRMED]` whether PT JAS wants input or output as the base.
-   The input weight and shrinkage are returned too so a report can show both.
+2. **Denominator = the sortation's INPUT quantity** (decided by the user,
+   2026-09-21, Fase 35; closes the open question of Fase 24). Sortation
+   shrinkage therefore raises... nothing: the ratio is raw weight per kg
+   *fed into* the sortation, so weight lost during sorting is not hidden
+   in the base. In every real row TOTAL == input (shrinkage 0), so the
+   known data are unchanged. Output total and shrinkage are still returned.
 3. **Proportional attribution.** A batch is not always consumed whole and
    not always from a single ancestor (partial re-sortation, Mixing of up to
    33 sources). Raw weight is therefore attributed by mass fraction: when an
@@ -77,8 +79,8 @@ class SortationRendemen:
     output_quantity: Decimal  # SORT "TOTAL (KG)"
     shrinkage_qty: Decimal
     raw_weight: Optional[Decimal]  # SORT "berat hijau" (None = lineage unknown)
-    rendemen: Optional[Decimal]  # raw_weight / output_quantity
-    yield_percent: Optional[Decimal]  # output_quantity / raw_weight * 100
+    rendemen: Optional[Decimal]  # raw_weight / input_quantity (Fase 35)
+    yield_percent: Optional[Decimal]  # input_quantity / raw_weight * 100
     complete: bool
     outputs: list[SortationOutput] = field(default_factory=list)
 
@@ -194,9 +196,9 @@ def sortation_rendemen(session: Session, event_id: int,
     out_total = sum((o.quantity for o in outputs), ZERO)
     raw = attr.taken(event_id, src.batch_id)
     rendemen = yield_pct = None
-    if raw is not None and out_total > ZERO and raw > ZERO:
-        rendemen = (raw / out_total).quantize(_RATIO_Q, ROUND_HALF_UP)
-        yield_pct = (out_total / raw * 100).quantize(_RATIO_Q, ROUND_HALF_UP)
+    if raw is not None and src.quantity > ZERO and raw > ZERO:
+        rendemen = (raw / src.quantity).quantize(_RATIO_Q, ROUND_HALF_UP)
+        yield_pct = (src.quantity / raw * 100).quantize(_RATIO_Q, ROUND_HALF_UP)
 
     out_rows = []
     for o in outputs:
@@ -238,4 +240,92 @@ def list_sortation_rendemen(
     if batch_id is not None:
         rows = [r for r in rows
                 if r.input_batch_id == batch_id or any(o.batch_id == batch_id for o in r.outputs)]
+    return rows
+
+
+# --------------------------------------------------------------- Mixing (Fase 35)
+# Keputusan user 2026-09-21: rendemen per Mixing = OUTPUT Mixing / TOTAL INPUT
+# sumber. Arahnya berbeda dari Sortasi (Sortasi = kg bahan baku per kg hasil,
+# >= 1; Mixing = fraksi hasil per kg masuk, <= 1 bila ada susut) -- keduanya
+# mengikuti rumus yang dipilih user, jangan disamakan. Per tahap saja: tidak
+# ada rendemen kumulatif/end-to-end (user 2026-09-21). Murni turunan dari
+# EventBatchLink; tidak ada kolom baru dan tidak ada atribusi berat bahan baku.
+
+
+@dataclass
+class MixingSourceRow:
+    batch_id: int
+    batch_number: Optional[str]
+    quantity: Decimal
+
+
+@dataclass
+class MixingRendemen:
+    event_id: int
+    event_date: dt.date
+    input_quantity: Decimal  # sum of all source quantities (MIX "QTY CP")
+    output_quantity: Decimal  # MIX "QTY AKHIR"
+    shrinkage_qty: Decimal
+    rendemen: Optional[Decimal]  # output_quantity / input_quantity (None if input == 0)
+    yield_percent: Optional[Decimal]  # rendemen * 100
+    output_batch_id: Optional[int]
+    output_batch_number: Optional[str]
+    source_count: int
+    sources: list[MixingSourceRow] = field(default_factory=list)
+
+
+def mixing_rendemen(session: Session, event_id: int) -> MixingRendemen:
+    event = session.get(ProcessEvent, event_id)
+    if event is None:
+        raise ValueError(f"Event {event_id} does not exist.")
+    if event.event_type != EventType.MIXING:
+        raise ValueError(f"Event {event_id} is {event.event_type.value}, not MIXING.")
+
+    attr = _Attribution(session)
+    inputs = attr._links(event_id, LinkRole.INPUT)
+    outputs = attr._links(event_id, LinkRole.OUTPUT)
+    in_total = sum((i.quantity for i in inputs), ZERO)
+    out_total = sum((o.quantity for o in outputs), ZERO)
+    rendemen = yield_pct = None
+    if in_total > ZERO:
+        rendemen = (out_total / in_total).quantize(_RATIO_Q, ROUND_HALF_UP)
+        yield_pct = (out_total / in_total * 100).quantize(_RATIO_Q, ROUND_HALF_UP)
+    out_batch = session.get(Batch, outputs[0].batch_id) if outputs else None
+    rows = []
+    for i in inputs:
+        b = session.get(Batch, i.batch_id)
+        rows.append(MixingSourceRow(i.batch_id, b.batch_number if b else None, i.quantity))
+    return MixingRendemen(
+        event_id=event_id,
+        event_date=event.event_date,
+        input_quantity=in_total,
+        output_quantity=out_total,
+        shrinkage_qty=event.shrinkage_qty,
+        rendemen=rendemen,
+        yield_percent=yield_pct,
+        output_batch_id=out_batch.batch_id if out_batch else None,
+        output_batch_number=out_batch.batch_number if out_batch else None,
+        source_count=len(inputs),
+        sources=rows,
+    )
+
+
+def list_mixing_rendemen(
+    session: Session,
+    batch_id: Optional[int] = None,
+    date_from: Optional[dt.date] = None,
+    date_to: Optional[dt.date] = None,
+) -> list[MixingRendemen]:
+    """One row per MIXING event, oldest first. `batch_id` keeps mixings whose
+    output OR any source is that batch."""
+    stmt = select(ProcessEvent.event_id).where(ProcessEvent.event_type == EventType.MIXING)
+    if date_from is not None:
+        stmt = stmt.where(ProcessEvent.event_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(ProcessEvent.event_date <= date_to)
+    ids = session.execute(stmt.order_by(ProcessEvent.event_date, ProcessEvent.event_id)).scalars().all()
+    rows = [mixing_rendemen(session, eid) for eid in ids]
+    if batch_id is not None:
+        rows = [r for r in rows
+                if r.output_batch_id == batch_id or any(s.batch_id == batch_id for s in r.sources)]
     return rows

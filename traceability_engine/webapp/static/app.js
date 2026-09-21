@@ -22,7 +22,10 @@ async function api(method, path, body) {
     try { data = await res.json(); } catch (e) { /* no body */ }
     if (!res.ok) {
         const msg = (data && (data.detail || data.error)) || `HTTP ${res.status}`;
-        throw new Error(msg);
+        const e = new Error(msg);
+        e.code = data && data.error;   // Fase 35: kode galat dari server
+        e.hint = data && data.hint;    // Fase 35: petunjuk dari server (bila ada)
+        throw e;
     }
     return data;
 }
@@ -34,6 +37,17 @@ function toast(msg, type = 'info', duration = 4000) {
     t.textContent = msg;
     c.appendChild(t);
     setTimeout(() => t.remove(), duration);
+}
+
+// Fase 35: pesan galat -- galat urutan tanggal (422 event_date_order_error)
+// tampil dengan ikon + petunjuk dari server, lebih lama; galat lain seperti
+// semula. Teks petunjuk berasal dari server (webapp/main.py), bukan aturan klien.
+function toastError(err, duration = 4000) {
+    if (err && err.code === 'event_date_order_error') {
+        toast('📅 ' + err.message + (err.hint ? '\n' + err.hint : ''), 'error', Math.max(duration, 10000));
+    } else {
+        toast('❌ ' + err.message, 'error', duration);
+    }
 }
 
 function todayStr() {
@@ -74,7 +88,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
         if (page === 'adjustment') { renderAuditLog(); renderDisposition(); }
         if (page === 'stock') renderStockSummary();
-        if (page === 'batch-history') renderRendemenSortation();
+        if (page === 'batch-history') { renderRendemenSortation(); renderRendemenMixing(); }
     });
 });
 
@@ -143,7 +157,7 @@ document.getElementById('customersTable').addEventListener('click', async (e) =>
         toast('✅ Alias ditambahkan — kini dianggap cocok pasti (exact) saat dipakai di form Delivery.', 'success', 5000);
         customerAliases = await api('GET', '/customer-aliases');
         renderCustomersTable();
-    } catch (err) { toast('❌ ' + err.message, 'error'); }
+    } catch (err) { toastError(err); }
 });
 
 document.getElementById('customerForm').addEventListener('submit', async (e) => {
@@ -155,7 +169,7 @@ document.getElementById('customerForm').addEventListener('submit', async (e) => 
         customers = await api('GET', '/customers');
         renderCustomerSelects();
         renderCustomersTable();
-    } catch (err) { toast('❌ ' + err.message, 'error'); }
+    } catch (err) { toastError(err); }
 });
 
 // ─── CUSTOMER MATCHING (Fase 21, resolves Fase 12 poin 7) ─────────────────
@@ -222,7 +236,7 @@ document.body.addEventListener('click', async (e) => {
             renderCustomersTable();
             select.value = created.customer_id;
             toast(`✅ Customer "${name}" dibuat & dipilih.`, 'success');
-        } catch (err) { toast('❌ ' + err.message, 'error'); return; }
+        } catch (err) { toastError(err); return; }
     }
     if (suggestBox) suggestBox.innerHTML = '';
 });
@@ -253,7 +267,7 @@ document.getElementById('supplierForm').addEventListener('submit', async (e) => 
         toast('✅ Supplier ditambahkan.', 'success');
         document.getElementById('supplierForm').reset();
         await loadMasterData();
-    } catch (err) { toast('❌ ' + err.message, 'error'); }
+    } catch (err) { toastError(err); }
 });
 
 document.getElementById('userForm').addEventListener('submit', async (e) => {
@@ -266,7 +280,7 @@ document.getElementById('userForm').addEventListener('submit', async (e) => {
         toast('✅ User ditambahkan.', 'success');
         document.getElementById('userForm').reset();
         await loadMasterData();
-    } catch (err) { toast('❌ ' + err.message, 'error'); }
+    } catch (err) { toastError(err); }
 });
 
 // ─── DASHBOARD ──────────────────────────────────────────────────────────
@@ -278,11 +292,12 @@ async function renderDashboard() {
             <td class="batch-id">${b.batch_id}</td>
             <td>${b.batch_number || '<span style="color:var(--text-secondary)">–</span>'}</td>
             <td><span class="badge badge-primary">${b.batch_type}</span></td>
+            <td>${jenisCell(b)}</td>
             <td>${supplierName(b.supplier_id)}</td>
             <td>${fmtQty(b.current_quantity)} ${b.unit}</td>
             <td><span class="badge badge-success">${b.status}</span></td>
         </tr>
-    `).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">Belum ada batch aktif</td></tr>';
+    `).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Belum ada batch aktif</td></tr>';
 }
 
 function supplierName(id) {
@@ -391,7 +406,7 @@ document.getElementById('receivingForm').addEventListener('submit', async (e) =>
         document.getElementById('rTanggal').value = todayStr();
         document.getElementById('rNomorBatchPreview').textContent = ' ';
         await refreshBatches();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 // ─── PROSES (schema-driven) ─────────────────────────────────────────────
@@ -610,7 +625,7 @@ function activeBatchOptionsHtml() {
     const active = batches.filter(b => b.status === 'ACTIVE');
     return active.length
         ? active.map(b =>
-            `<option value="${b.batch_id}">#${b.batch_id} ${b.batch_number || ''} — ${b.batch_type} (${fmtQty(b.current_quantity)} kg)</option>`).join('')
+            `<option value="${b.batch_id}">#${b.batch_id} ${b.batch_number || ''} — ${b.batch_type}${jenisShort(b)} (${fmtQty(b.current_quantity)} kg)</option>`).join('')
         : '';
 }
 
@@ -828,7 +843,7 @@ document.getElementById('prosesForm').addEventListener('submit', async (e) => {
         document.getElementById('prosesForm').reset();
         renderProsesFields();
         await refreshBatches();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 // ─── MIXING (MANY->ONE, own form -- see services/mixing.py) ────────────
@@ -960,7 +975,7 @@ document.getElementById('mixingForm').addEventListener('submit', async (e) => {
         initMixSources();
         await refreshBatches();
         await renderMixingHistory();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 async function renderMixingHistory() {
@@ -1073,7 +1088,7 @@ document.getElementById('vacuumForm').addEventListener('submit', async (e) => {
         initVacLines();
         await refreshBatches();
         await renderVacuumHistory();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 async function renderVacuumHistory() {
@@ -1198,7 +1213,7 @@ document.getElementById('packingForm').addEventListener('submit', async (e) => {
         initPkSources();
         await refreshBatches();
         await renderPackingHistory();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 async function renderPackingHistory() {
@@ -1366,7 +1381,7 @@ document.getElementById('deliveryForm').addEventListener('submit', async (e) => 
         initDSources();
         await refreshBatches();
         await renderDeliveryHistory();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 document.getElementById('sampleDeliveryForm').addEventListener('submit', async (e) => {
@@ -1407,7 +1422,7 @@ document.getElementById('sampleDeliveryForm').addEventListener('submit', async (
         initSdSources();
         await refreshBatches();
         await renderSampleDeliveryHistory();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 async function renderDeliveryHistory() {
@@ -1480,7 +1495,7 @@ document.getElementById('adjustmentForm').addEventListener('submit', async (e) =
         document.getElementById('ajTanggal').value = todayStr();
         await refreshBatches();
         await renderAuditLog();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 document.getElementById('rejectForm').addEventListener('submit', async (e) => {
@@ -1496,7 +1511,7 @@ document.getElementById('rejectForm').addEventListener('submit', async (e) => {
         await refreshBatches();
         await renderAuditLog();
         await renderDisposition();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 document.getElementById('supersedeForm').addEventListener('submit', async (e) => {
@@ -1511,7 +1526,7 @@ document.getElementById('supersedeForm').addEventListener('submit', async (e) =>
         document.getElementById('supersedeForm').reset();
         await refreshBatches();
         await renderAuditLog();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 // ─── DISPOSISI BATCH REJECTED (Fase 34, UI atas Fase 26) ────────────────
@@ -1531,7 +1546,7 @@ async function renderDisposition() {
     if (!tbody || !sel) return;
     let rows;
     try { rows = await api('GET', '/audit/disposition'); }
-    catch (err) { toast('❌ ' + err.message, 'error', 6000); return; }
+    catch (err) { toastError(err, 6000); return; }
     tbody.innerHTML = rows.length ? rows.map(r => {
         const [label, cls] = DISPOSITION_LABELS[r.disposition] || [r.disposition, 'badge-gray'];
         const warn = r.used_after_rejection_event_ids.length
@@ -1579,7 +1594,7 @@ document.getElementById('returnForm').addEventListener('submit', async (e) => {
         await refreshBatches();
         await renderAuditLog();
         await renderDisposition();
-    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+    } catch (err) { toastError(err, 6000); }
 });
 
 async function renderAuditLog() {
@@ -1596,6 +1611,12 @@ async function renderAuditLog() {
 }
 
 // ─── BATCH LIST ─────────────────────────────────────────────────────────
+// Fase 35: label Jenis singkat untuk teks <option> (tanpa HTML), memakai
+// BatchOut.jenis_label yang sama dengan jenisCell(); '' bila jenis kosong.
+function jenisShort(b) {
+    if (!b.jenis_code) return '';
+    return ' · ' + (b.jenis_label ? b.jenis_label : 'AA ' + b.jenis_code + ' (tidak dikenal)');
+}
 // Fase 34: label Jenis (AA) dari BatchOut.jenis_label / jenis_is_legacy
 // (read-side saja; 01 Tahitensis, 02 Planifolia, 03/04 = legacy, Fase 30).
 function jenisCell(b) {
@@ -1836,7 +1857,7 @@ async function boot() {
         statusEl.textContent = 'Terhubung'; statusEl.className = 'api-status ok';
     } catch (err) {
         statusEl.textContent = 'Gagal terhubung ke API'; statusEl.className = 'api-status err';
-        toast('❌ ' + err.message, 'error', 8000);
+        toastError(err, 8000);
     }
 }
 boot();
@@ -1863,5 +1884,29 @@ async function renderRendemenSortation() {
             : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada sortasi</td></tr>';
     } catch (err) {
         tb.innerHTML = `<tr><td colspan="8" style="color:var(--danger)">Rendemen gagal dimuat: ${err.message}</td></tr>`;
+    }
+}
+
+// ─── RENDEMEN MIXING (Fase 35) -- GET /rendemen/mixing; angka dihitung server. ─
+async function renderRendemenMixing() {
+    const tb = document.getElementById('rendemenMixTable');
+    try {
+        const rows = await api('GET', '/rendemen/mixing');
+        const dash = '–';
+        tb.innerHTML = rows.length ? rows.slice().reverse().map(r => `
+            <tr>
+                <td>${r.event_date}</td>
+                <td>${r.output_batch_id != null ? '#' + r.output_batch_id + ' ' + (r.output_batch_number || '') : dash}</td>
+                <td>${r.source_count}</td>
+                <td>${fmtQty(r.input_quantity)}</td>
+                <td>${fmtQty(r.output_quantity)}</td>
+                <td>${fmtQty(r.shrinkage_qty)}</td>
+                <td><strong>${r.rendemen != null ? Number(r.rendemen).toFixed(4) : dash}</strong></td>
+                <td>${r.yield_percent != null ? Number(r.yield_percent).toFixed(2) + '%' : dash}</td>
+                <td>${r.sources.map(s => `#${s.batch_id} ${s.batch_number || ''} (${fmtQty(s.quantity)})`).join(', ')}</td>
+            </tr>`).join('')
+            : '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary)">Belum ada Mixing</td></tr>';
+    } catch (err) {
+        tb.innerHTML = `<tr><td colspan="9" style="color:var(--danger)">Rendemen Mixing gagal dimuat: ${err.message}</td></tr>`;
     }
 }

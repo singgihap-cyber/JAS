@@ -1696,10 +1696,12 @@ def test_rendemen_sortation_endpoints(client, supplier_id, pic_id):
     assert len(rows) == 1 and rows[0]["event_id"] == event_id
     assert rows[0]["raw_weight"] == "77.740" and rows[0]["complete"] is True
     assert rows[0]["output_quantity"] == "13.555"
-    assert rows[0]["rendemen"] == "5.7352" and len(rows[0]["outputs"]) == 2
+    # Fase 35: penyebut = INPUT sortasi (77,74 masuk, 13,555 keluar tanpa airdrying di
+    # antaranya) -> 77,74 / 77,74 = 1. Basis output lama (5.7352) tidak lagi dipakai.
+    assert rows[0]["rendemen"] == "1.0000" and len(rows[0]["outputs"]) == 2
 
     one = client.get(f"/api/rendemen/sortation/{event_id}")
-    assert one.status_code == 200 and one.json()["rendemen"] == "5.7352"
+    assert one.status_code == 200 and one.json()["rendemen"] == "1.0000"
     assert len(client.get("/api/rendemen/sortation", params={"batch_id": src}).json()) == 1
     assert client.get("/api/rendemen/sortation", params={"batch_id": 999}).json() == []
     assert client.get("/api/rendemen/sortation/9999").status_code == 404
@@ -1718,6 +1720,9 @@ def test_date_order_audit_endpoint(client, supplier_id, pic_id):
     # Fase 25b: default = blokir (422, detail "lebih awal N hari"), tidak ada yang tersimpan.
     assert s.status_code == 422, s.text
     assert "lebih awal 3 hari" in s.json()["detail"]
+    # Fase 35: kode galat khusus + petunjuk untuk UI (status tetap 422)
+    assert s.json()["error"] == "event_date_order_error"
+    assert "MULAI" in s.json()["hint"]
     assert client.get("/api/audit/date-order").json() == []
     assert client.get("/api/audit/date-order", params={"batch_id": 999}).json() == []
     # Sortasi dicatat dengan tanggal MULAI yang benar -> lolos, audit bersih.
@@ -1875,3 +1880,32 @@ def test_batch_out_exposes_jenis_label_and_legacy_flag(client, supplier_id, pic_
     assert plain.status_code == 201
     p = plain.json()["batch"]
     assert p["jenis_code"] is None and p["jenis_label"] is None and p["jenis_is_legacy"] is False
+
+
+def test_rendemen_mixing_endpoints(client, supplier_id, pic_id):
+    """Fase 35: rendemen per Mixing = output / total input sumber; list + single + 404."""
+    ids = []
+    for qty in ("40.000", "30.000"):
+        r = client.post("/api/receiving", json={
+            "event_date": "2026-09-18", "pic_user_id": pic_id, "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING", "net_quantity": qty})
+        ids.append(r.json()["batch"]["batch_id"])
+    m = client.post("/api/mixing", json={
+        "event_date": "2026-09-18", "pic_user_id": pic_id,
+        "sources": [{"batch_id": ids[0], "quantity": "40.000"},
+                    {"batch_id": ids[1], "quantity": "30.000"}],
+        "final_qty": "68.000", "product_description": "GOURMET"})
+    assert m.status_code == 201, m.text
+    event_id = m.json()["event"]["event_id"]
+
+    rows = client.get("/api/rendemen/mixing").json()
+    assert len(rows) == 1 and rows[0]["event_id"] == event_id
+    assert rows[0]["input_quantity"] == "70.000" and rows[0]["output_quantity"] == "68.000"
+    assert rows[0]["rendemen"] == "0.9714" and rows[0]["source_count"] == 2
+    one = client.get(f"/api/rendemen/mixing/{event_id}")
+    assert one.status_code == 200 and one.json()["yield_percent"] == "97.1429"
+    assert len(client.get("/api/rendemen/mixing", params={"batch_id": ids[0]}).json()) == 1
+    assert client.get("/api/rendemen/mixing", params={"batch_id": 999}).json() == []
+    assert client.get("/api/rendemen/mixing/9999").status_code == 404
+    # sebuah event non-Mixing (Receiving) bukan Mixing -> 404
+    assert client.get("/api/rendemen/mixing/1").status_code == 404

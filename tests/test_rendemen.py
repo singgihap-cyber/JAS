@@ -23,7 +23,7 @@ from traceability_engine.services.events import (
 from traceability_engine.services.qc_md import QCTestInput, record_qc_test
 from traceability_engine.services.receiving import ReceivingInput, record_receiving
 from traceability_engine.services.rendemen import (
-    list_sortation_rendemen, sortation_rendemen,
+    list_mixing_rendemen, list_sortation_rendemen, mixing_rendemen, sortation_rendemen,
 )
 from traceability_engine.services.sortation import SortationInput, record_sortation
 from traceability_engine.enums import QCStage
@@ -141,15 +141,17 @@ def test_unknown_lineage_is_reported_not_guessed(session, staff_user):
     assert r.complete is False and r.output_quantity == D("10")
 
 
-def test_shrinkage_in_sortation_uses_output_total(session, staff_user, supplier):
+def test_shrinkage_in_sortation_uses_input_total(session, staff_user, supplier):
     uid = staff_user.user_id
     g = _green(session, uid, supplier, D("50"))
     ev = record_sortation(session, SortationInput(
         event_date=D0, pic_user_id=uid, batch_id=g.batch_id, eg_qty=D("9")))
     r = sortation_rendemen(session, ev.event_id)
-    # input defaults to on-hand (50); output 9 -> shrinkage 41, base = output total
+    # input defaults to on-hand (50); output 9 -> shrinkage 41.
+    # Fase 35 (user 2026-09-21): base = INPUT total, so 50 raw / 50 fed in = 1.
     assert r.input_quantity == D("50") and r.shrinkage_qty == D("41")
-    assert r.rendemen == (D("50") / D("9")).quantize(D("0.0001"))
+    assert r.output_quantity == D("9")
+    assert r.rendemen == D("1.0000") and r.yield_percent == D("100.0000")
 
 
 def test_non_sortation_event_rejected(session, staff_user, supplier):
@@ -173,3 +175,49 @@ def test_list_filters_by_batch_and_date(session, staff_user, supplier):
     assert [r.event_id for r in list_sortation_rendemen(session, batch_id=out1)] == [e1.event_id]
     assert [r.event_id for r in list_sortation_rendemen(session, date_from=dt.date(2026, 6, 25))] == [e2.event_id]
     assert [r.event_id for r in list_sortation_rendemen(session, date_to=dt.date(2026, 6, 25))] == [e1.event_id]
+
+
+# --------------------------------------------------------------- Fase 35: Mixing
+def _mix(session, uid, sources, final):
+    return record_process_event(
+        session, event_type=EventType.MIXING, event_date=D0, pic_user_id=uid,
+        inputs=[InputSpec(b.batch_id, q) for b, q in sources],
+        outputs=[OutputSpec(final, new_batch=NewBatchSpec(batch_type=BatchType.PROCESSED))],
+        shrinkage_qty=sum((q for _, q in sources), D("0")) - final)
+
+
+def test_mixing_rendemen_is_output_over_total_input(session, staff_user, supplier):
+    uid = staff_user.user_id
+    a, b = _green(session, uid, supplier, D("40")), _green(session, uid, supplier, D("30"))
+    mix = _mix(session, uid, [(a, D("40")), (b, D("30"))], D("68"))
+    r = mixing_rendemen(session, mix.event_id)
+    assert r.input_quantity == D("70") and r.output_quantity == D("68")
+    assert r.shrinkage_qty == D("2")
+    assert r.rendemen == D("0.9714") and r.yield_percent == D("97.1429")
+    assert r.source_count == 2 and [s.batch_id for s in r.sources] == [a.batch_id, b.batch_id]
+    assert r.output_batch_id is not None
+
+
+def test_mixing_rendemen_no_shrinkage_is_one(session, staff_user, supplier):
+    uid = staff_user.user_id
+    a, b = _green(session, uid, supplier, D("10")), _green(session, uid, supplier, D("5"))
+    mix = _mix(session, uid, [(a, D("10")), (b, D("5"))], D("15"))
+    assert mixing_rendemen(session, mix.event_id).rendemen == D("1.0000")
+
+
+def test_mixing_rendemen_rejects_other_events_and_lists_with_filters(session, staff_user, supplier):
+    uid = staff_user.user_id
+    a, b = _green(session, uid, supplier, D("10")), _green(session, uid, supplier, D("5"))
+    c = _green(session, uid, supplier, D("7"))
+    with pytest.raises(ValueError):
+        mixing_rendemen(session, 9999)
+    mix = _mix(session, uid, [(a, D("10")), (b, D("5"))], D("14"))
+    sort = record_sortation(session, SortationInput(
+        event_date=D0, pic_user_id=uid, batch_id=c.batch_id, eg_qty=D("7")))
+    with pytest.raises(ValueError):
+        mixing_rendemen(session, sort.event_id)
+    rows = list_mixing_rendemen(session)
+    assert [r.event_id for r in rows] == [mix.event_id]  # sortation not listed
+    assert len(list_mixing_rendemen(session, batch_id=a.batch_id)) == 1
+    assert list_mixing_rendemen(session, batch_id=c.batch_id) == []
+    assert list_mixing_rendemen(session, date_from=D0 + dt.timedelta(days=1)) == []

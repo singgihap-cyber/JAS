@@ -47,8 +47,8 @@
                 </div>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>Batch ID</th><th>Batch Number</th><th>Jenis Alur</th><th>Supplier</th><th>Qty Saat Ini</th><th>Status</th></tr></thead>
-                        <tbody id="dashboardTable"><tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">Memuat...</td></tr></tbody>
+                        <thead><tr><th>Batch ID</th><th>Batch Number</th><th>Jenis Alur</th><th>Jenis (AA)</th><th>Supplier</th><th>Qty Saat Ini</th><th>Status</th></tr></thead>
+                        <tbody id="dashboardTable"><tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Memuat...</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -136,11 +136,12 @@
                         </div>
                     </div>
 
-                    <div class="form-divider">🔍 On-Spec / Off-Spec (dicatat, tidak memisah batch)</div>
+                    <div class="form-divider">🔍 On-Spec / Off-Spec (off-spec otomatis dikembalikan ke supplier)</div>
                     <div class="info-box">
-                        Sesuai keputusan engine (services/receiving.py): seluruh netto tetap jadi <strong>satu
-                        batch</strong>. On-spec/off-spec di sini hanya dicatat sebagai catatan, belum otomatis
-                        membuat batch terpisah atau menandai batch ditolak.
+                        Seluruh netto tetap tercatat sebagai <strong>satu batch</strong>. Berat <strong>Off-Spec otomatis
+                        dikembalikan ke supplier</strong>: sistem mencatat event <em>Pengembalian ke Supplier</em>
+                        sebesar off-spec pada transaksi yang sama, sehingga stok batch = netto − off-spec. Batch
+                        tidak ditandai ditolak, dan off-spec tidak boleh negatif atau melebihi netto.
                     </div>
                     <div class="form-row">
                         <div class="form-group">
@@ -947,14 +948,28 @@
             <div class="section">
                 <div class="section-title">📐 Rendemen Sortasi</div>
                 <div class="info-box">
-                    Rendemen = berat bahan baku diterima (netto PPH) ÷ total hasil sortasi, dihitung otomatis dari
-                    genealogi — sama dengan kolom RENDEMEN di sheet SORT (rasio kg bahan baku per kg hasil,
-                    bukan persen). Kosong (–) bila asal-usul batch belum lengkap.
+                    Rendemen = berat bahan baku diterima (netto PPH) ÷ total <strong>input</strong> sortasi, dihitung otomatis dari
+                    genealogi — rasio kg bahan baku per kg yang disortir, bukan persen (identik dengan kolom RENDEMEN sheet SORT
+                    selama sortasi tidak punya susut). Kosong (–) bila asal-usul batch belum lengkap.
                 </div>
                 <div class="table-container">
                     <table>
                         <thead><tr><th>Tanggal</th><th>Batch Sumber</th><th>Berat Bahan Baku</th><th>Total Hasil</th><th>Susut</th><th>Rendemen</th><th>Hasil (%)</th><th>Output</th></tr></thead>
                         <tbody id="rendemenTable"><tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Memuat...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="section">
+                <div class="section-title">📐 Rendemen Mixing</div>
+                <div class="info-box">
+                    Rendemen Mixing = qty hasil Mixing ÷ total qty semua batch sumber (hasil per kg yang masuk; 1,00 =
+                    tanpa susut). Arahnya kebalikan dari rendemen Sortasi. Dihitung per tahap, tidak dijumlahkan
+                    end-to-end.
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Tanggal</th><th>Batch Hasil</th><th>Jumlah Sumber</th><th>Total Input</th><th>Qty Hasil</th><th>Susut</th><th>Rendemen</th><th>Hasil (%)</th><th>Sumber</th></tr></thead>
+                        <tbody id="rendemenMixTable"><tr><td colspan="9" style="text-align:center;color:var(--text-secondary)">Memuat...</td></tr></tbody>
                     </table>
                 </div>
             </div>
