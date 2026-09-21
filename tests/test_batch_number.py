@@ -3,7 +3,6 @@ import datetime as dt
 import pytest
 
 from traceability_engine import batch_number
-from traceability_engine.exceptions import BatchNumberNotImplementedError
 
 
 def test_parse_historical_two_digit_supplier():
@@ -38,11 +37,40 @@ def test_parse_rejects_unrecognized_format():
         batch_number.parse("not-a-batch-number")
 
 
-def test_generate_is_not_implemented():
-    """BATCH_NUMBER_SPEC.md: do not implement/change the generator until the
-    AA (Jenis) segment is confirmed. This must keep failing loudly."""
-    with pytest.raises(BatchNumberNotImplementedError):
-        batch_number.generate()
+def _gen(**kw):
+    base = dict(jenis_code="02", grade_code="01", supplier_code="18",
+                receiving_date=dt.date(2026, 9, 21))
+    base.update(kw)
+    return batch_number.generate(**base)
+
+
+def test_generate_pads_supplier_to_three_digits():
+    assert _gen() == "0201018-260921-00"
+    assert _gen(supplier_code="024") == "0201024-260921-00"
+
+
+def test_generate_roundtrips_through_parse():
+    c = batch_number.parse(_gen(jenis_code="01", grade_code="00"))
+    assert (c.jenis_code, c.grade_code, c.supplier_code, c.process_code) == ("01", "00", "018", "00")
+    assert c.supplier_code_width == 3 and c.receiving_date == dt.date(2026, 9, 21)
+    assert not c.jenis_is_legacy
+
+
+@pytest.mark.parametrize("kw", [
+    {"jenis_code": "03"}, {"jenis_code": "04"}, {"jenis_code": "1"},
+    {"grade_code": "07"}, {"grade_code": "10"},
+    {"supplier_code": "1234"}, {"supplier_code": "ab"},
+    {"process_code": "03"}, {"process_code": "01"},
+])
+def test_generate_rejects_invalid(kw):
+    with pytest.raises(ValueError):
+        _gen(**kw)
+
+
+def test_generate_accepts_grade_04_and_06():
+    assert _gen(grade_code="04").startswith("0204")
+    assert _gen(grade_code="06").startswith("0206")
+
 
 
 def test_jenis_official_codes_are_two():

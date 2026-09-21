@@ -102,7 +102,9 @@ def _validate_structure(
     if event_type in NO_INPUT_EVENT_TYPES:
         if inputs:
             raise InvalidEventStructureError(f"{event_type.value} must have no inputs.")
-        if len(outputs) != 1 or outputs[0].new_batch is None:
+        # Fase 31: RECEIVING boleh menambah stok ke batch yang ada (batch_id)
+        # -- penerimaan kedua bernomor sama di hari yang sama = satu batch.
+        if len(outputs) != 1:
             raise InvalidEventStructureError(
                 f"{event_type.value} must produce exactly one new batch."
             )

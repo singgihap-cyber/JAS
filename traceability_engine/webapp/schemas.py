@@ -173,6 +173,8 @@ class ReceivingCreate(BaseModel):
     smell_test: Optional[str] = None
     transport_no: Optional[str] = None  # PPH "NO. ANGKUT" -- Fase 23
     transport_condition: Optional[str] = None  # PPH "KONDISI ANGKUT" -- Fase 23
+    jenis_code: Optional[str] = None  # Fase 31: 01 Tahitensis / 02 Planifolia -> nomor batch otomatis
+    grade_code: Optional[str] = None  # Fase 31: BB 00-06 (Hijau default 00)
 
 
 class ReceivingResult(BaseModel):

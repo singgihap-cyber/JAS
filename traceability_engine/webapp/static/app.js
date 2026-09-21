@@ -327,6 +327,38 @@ document.getElementById('rNomorBatch').addEventListener('input', (e) => {
     }, 350);
 });
 
+// Fase 31: pratinjau nomor batch otomatis (Jenis + Grade + Supplier + Tanggal)
+let autoNumberTimer = null;
+function refreshAutoNumber() {
+    clearTimeout(autoNumberTimer);
+    const hint = document.getElementById('rAutoNumberPreview');
+    const jenis = document.getElementById('rJenis').value;
+    const manual = document.getElementById('rNomorBatch').value.trim();
+    const hijau = document.getElementById('rBatchType').value === 'RAW_HIJAU';
+    const gradeEl = document.getElementById('rGrade');
+    if (hijau) gradeEl.value = '00';
+    const grade = gradeEl.value;
+    const supplier = document.getElementById('rSupplier').value;
+    const tgl = document.getElementById('rTanggal').value;
+    if (!jenis) { hint.textContent = ' '; return; }
+    if (manual) { hint.textContent = 'Nomor batch manual terisi — nomor otomatis tidak dipakai.'; return; }
+    if (!grade || !supplier || !tgl) { hint.textContent = 'Lengkapi Grade, Supplier, dan Tanggal.'; return; }
+    autoNumberTimer = setTimeout(async () => {
+        try {
+            const q = new URLSearchParams({ jenis_code: jenis, grade_code: grade, supplier_id: supplier, event_date: tgl, batch_type: document.getElementById('rBatchType').value });
+            const r = await api('GET', '/batch-number/preview?' + q.toString());
+            hint.innerHTML = r.ok
+                ? `Nomor batch: <code>${r.batch_number}</code>` + (r.will_merge ? ` — sudah ada (batch #${r.existing_batch_id}); stok akan DITAMBAHKAN ke batch itu.` : ' — batch baru.')
+                : '⚠️ ' + r.reason;
+        } catch (err) { hint.textContent = ''; }
+    }, 300);
+}
+['rJenis', 'rGrade', 'rSupplier', 'rTanggal', 'rBatchType', 'rNomorBatch'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('change', refreshAutoNumber);
+    el.addEventListener('input', refreshAutoNumber);
+});
+
 document.getElementById('receivingForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const netto = parseFloat(document.getElementById('rNetto').value);
@@ -338,6 +370,8 @@ document.getElementById('receivingForm').addEventListener('submit', async (e) =>
         batch_type: document.getElementById('rBatchType').value,
         net_quantity: netto,
         batch_number: document.getElementById('rNomorBatch').value.trim() || null,
+        jenis_code: document.getElementById('rJenis').value || null,
+        grade_code: document.getElementById('rGrade').value || null,
         product_description: document.getElementById('rDesc').value.trim() || null,
         packaging_condition: document.getElementById('rKemasan').value.trim() || null,
         coly: document.getElementById('rColy').value ? Number(document.getElementById('rColy').value) : null,
@@ -352,7 +386,7 @@ document.getElementById('receivingForm').addEventListener('submit', async (e) =>
     if (!payload.pic_user_id || !payload.supplier_id) { toast('PIC dan Supplier harus dipilih.', 'error'); return; }
     try {
         const result = await api('POST', '/receiving', payload);
-        toast(`✅ Batch #${result.batch.batch_id} dibuat — ${fmtQty(result.batch.current_quantity)} kg`, 'success', 5000);
+        toast(`✅ Batch #${result.batch.batch_id}${result.batch.batch_number ? ' (' + result.batch.batch_number + ')' : ''} — stok kini ${fmtQty(result.batch.current_quantity)} kg`, 'success', 5000);
         document.getElementById('receivingForm').reset();
         document.getElementById('rTanggal').value = todayStr();
         document.getElementById('rNomorBatchPreview').textContent = ' ';

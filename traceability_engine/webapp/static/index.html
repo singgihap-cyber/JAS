@@ -81,6 +81,31 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group">
+                            <label class="form-label">Jenis Vanila (nomor batch otomatis)</label>
+                            <select class="form-select" id="rJenis">
+                                <option value="">— manual / tanpa nomor —</option>
+                                <option value="01">01 — Tahitensis</option>
+                                <option value="02">02 — Planifolia</option>
+                            </select>
+                            <div class="form-hint">Pilih Jenis + Grade untuk membuat nomor batch otomatis (kolom Nomor Batch harus kosong).</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Grade (BB)</label>
+                            <select class="form-select" id="rGrade">
+                                <option value="">— pilih —</option>
+                                <option value="01">01 — Gourmet</option>
+                                <option value="02">02 — Extract Grade (EG)</option>
+                                <option value="03">03 — Early Picked (EP)</option>
+                                <option value="04">04 — Others</option>
+                                <option value="05">05 — Powder</option>
+                                <option value="06">06 — Powder Exhausted</option>
+                                <option value="00">00 — Hijau</option>
+                            </select>
+                            <div class="form-hint" id="rAutoNumberPreview">&nbsp;</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
                             <label class="form-label">Supplier <span style="color:var(--danger)">*</span></label>
                             <select class="form-select" id="rSupplier" required></select>
                         </div>

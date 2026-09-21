@@ -11,6 +11,8 @@ view for free from this one endpoint.
 """
 from __future__ import annotations
 
+import datetime as dt
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ... import batch_number as batch_number_mod
 from ...enums import BatchStatus, BatchType, EventType
+from ...exceptions import TraceabilityError
 from ...models import Batch, ProcessEvent
 from ..database import get_db
 from ..schemas import BatchDetailOut, BatchOut, ProcessEventOut
@@ -76,6 +79,44 @@ def list_process_events(
         stmt = stmt.where(ProcessEvent.event_id.in_(event_ids))
     events = db.execute(stmt).scalars().all()
     return [event_to_out(db, e) for e in events]
+
+
+@router.get("/batch-number/preview")
+def preview_batch_number(
+    jenis_code: str = Query(...),
+    supplier_id: int = Query(...),
+    event_date: dt.date = Query(...),
+    batch_type: str = Query("RAW_KERING"),
+    grade_code: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Fase 31: pratinjau nomor batch otomatis untuk form Receiving. Tidak
+    menyimpan apa pun; `will_merge` = nomor sudah dipakai batch yang akan
+    ditambah stok (penerimaan kedua di hari yang sama). Input tak valid ->
+    ok=False (bukan galat), agar UI cukup menampilkan alasannya."""
+    from ...enums import BatchType
+    from ...services.receiving import (
+        ReceivingInput,
+        _find_mergeable_batch,
+        resolve_generated_batch_number,
+    )
+
+    try:
+        data = ReceivingInput(
+            event_date=event_date, pic_user_id=0, supplier_id=supplier_id,
+            batch_type=BatchType(batch_type), net_quantity=Decimal("1"),
+            jenis_code=jenis_code, grade_code=grade_code,
+        )
+        number = resolve_generated_batch_number(db, data)
+        existing = _find_mergeable_batch(db, number)
+    except (ValueError, TraceabilityError) as exc:
+        return {"ok": False, "reason": str(exc)}
+    return {
+        "ok": True,
+        "batch_number": number,
+        "will_merge": existing is not None,
+        "existing_batch_id": existing.batch_id if existing else None,
+    }
 
 
 @router.get("/batch-number/parse")

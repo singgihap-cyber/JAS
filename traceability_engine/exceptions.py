@@ -32,10 +32,9 @@ class UnauthorizedAdjustmentError(TraceabilityError):
     event (GENEALOGY.md §5.2, confirmed 2026-09-14)."""
 
 
-class BatchNumberNotImplementedError(TraceabilityError):
-    """Raised by batch_number.generate() -- see BATCH_NUMBER_SPEC.md: the
-    AA (Jenis) segment is still [UNCONFIRMED], so the generator must not be
-    implemented yet (PROJECT_STATUS.md blocker, carried over from Phase 3)."""
+class BatchNumberConflictError(TraceabilityError):
+    """Fase 31: nomor batch hasil generator sudah dipakai batch yang tidak
+    boleh digabung (sudah diproses/tidak aktif)."""
 
 
 class StockReconciliationError(TraceabilityError):

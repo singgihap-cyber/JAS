@@ -1752,3 +1752,26 @@ def test_supplier_return_and_disposition_audit_endpoints(client, supplier_id, pi
     row = client.get("/api/audit/disposition", params={"batch_id": b}).json()[0]
     assert row["disposition"] == "RETURNED" and row["returned_quantity"] == "10.000"
     assert client.get("/api/audit/disposition", params={"batch_id": 999}).json() == []
+
+
+def test_batch_number_preview_and_generated_receiving_merge(client, supplier_id, pic_id):
+    """Fase 31: preview -> Receiving otomatis -> penerimaan kedua digabung."""
+    q = {"jenis_code": "02", "grade_code": "01", "supplier_id": supplier_id, "event_date": "2026-09-21"}
+    r = client.get("/api/batch-number/preview", params=q).json()
+    assert r == {"ok": True, "batch_number": "0201024-260921-00", "will_merge": False, "existing_batch_id": None}
+
+    body = {"event_date": "2026-09-21", "pic_user_id": pic_id, "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING", "net_quantity": 10, "jenis_code": "02", "grade_code": "01"}
+    first = client.post("/api/receiving", json=body)
+    assert first.status_code == 201
+    assert first.json()["batch"]["batch_number"] == "0201024-260921-00"
+
+    assert client.get("/api/batch-number/preview", params=q).json()["will_merge"] is True
+    second = client.post("/api/receiving", json={**body, "net_quantity": 4})
+    assert second.status_code == 201
+    assert second.json()["batch"]["batch_id"] == first.json()["batch"]["batch_id"]
+    assert float(second.json()["batch"]["current_quantity"]) == 14
+
+    bad = client.get("/api/batch-number/preview", params={**q, "jenis_code": "03"}).json()
+    assert bad["ok"] is False
+    assert client.post("/api/receiving", json={**body, "jenis_code": "03"}).status_code == 422

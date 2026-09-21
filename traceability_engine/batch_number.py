@@ -1,5 +1,5 @@
-"""Batch-number parsing (NOT generation; Fase 30: AA/Jenis now confirmed,
-generator still not opened -- parser/validator scope only) -- see BATCH_NUMBER_SPEC.md.
+"""Batch-number parsing and (Fase 31) generation for new Receiving batches
+(PP=00 only) -- see BATCH_NUMBER_SPEC.md and claude/31_GENERATOR.md.
 
 Format:
     Historical (2-digit supplier): [AA][BB][CC]-[YYMMDD]-[PP]   e.g. 030224-260221-00
@@ -9,19 +9,14 @@ Format:
 rows now coexist (BATCH_NUMBER_SPEC.md "Resolved by PT JAS", go-forward
 migration, no retroactive rewrite of history).
 
-`generate()` intentionally raises BatchNumberNotImplementedError.
-BATCH_NUMBER_SPEC.md explicitly prohibits implementing/changing the
-generator until the AA (Jenis) segment is confirmed with PT JAS staff
-(Robiah/Wakhidah/Fahrul) -- see "Open questions" in that document and the
-carried-over blocker in PROJECT_STATUS.md. This is not an oversight.
+`generate()` (Fase 31) builds only new-format numbers (3-digit supplier,
+Jenis 01/02, PP=00).
 """
 from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
 from typing import Optional
-
-from .exceptions import BatchNumberNotImplementedError
 
 # Grade Master (Proses.docx) vs. the compressed BB in-string encoding
 # (Grade Master code / 10). Kept here only as a documented reference for
@@ -121,20 +116,50 @@ def parse(batch_number: str) -> BatchNumberComponents:
     )
 
 
-def generate(*args, **kwargs) -> str:
-    """DO NOT IMPLEMENT until the AA (Jenis) segment is confirmed.
+# Fase 31 -- generator dibuka (keputusan user 2026-09-21): hanya untuk batch
+# baru dari Receiving (PP=00). PP lain (Mixing 03, Upgrade 01, Downgrade 02,
+# Rework 04) tetap ketikan staf sampai user memutuskan aturannya.
+GENERATABLE_PROCESS_CODES = ("00",)
 
-    See BATCH_NUMBER_SPEC.md: "Do not implement/change the generator until
-    AA is resolved." Callers needing a batch number for a newly-created
-    batch (e.g. Fase 4 Receiving) must accept `batch_number` as external
-    manual input, or leave it null, until this blocker clears -- see
-    PROJECT_STATUS.md.
+
+def generate(
+    *,
+    jenis_code: str,
+    grade_code: str,
+    supplier_code: str,
+    receiving_date: dt.date,
+    process_code: str = "00",
+) -> str:
+    """Rakit nomor batch BARU: [AA][BB][CCC]-[YYMMDD]-[PP] (supplier 3 digit).
+
+    - `jenis_code` hanya `01`/`02` (JENIS_CODES); kode lama 03/04 ditolak.
+    - `grade_code` = BB (Grade Master / 10): 00-06. Semua diterima apa adanya
+      (keputusan user: keraguan Grade 04/06 tidak memblokir).
+    - `supplier_code` numerik 1-3 digit, di-zero-pad ke 3 digit (`24` -> `024`).
+    - `process_code` hanya `00` (Original) pada Fase 31.
+    Raises ValueError bila ada masukan tak valid.
     """
-    raise BatchNumberNotImplementedError(
-        "batch_number.generate() is intentionally not implemented: the AA "
-        "(Jenis) segment meaning is still [UNCONFIRMED] per "
-        "BATCH_NUMBER_SPEC.md, and that document explicitly prohibits "
-        "implementing or changing the generator before it is resolved with "
-        "PT JAS staff (Robiah/Wakhidah/Fahrul). Pass batch_number explicitly "
-        "(manual/external input) or None instead of calling this function."
+    if jenis_code not in JENIS_CODES:
+        raise ValueError(
+            f"Jenis {jenis_code!r} tidak valid untuk batch baru (hanya "
+            f"{', '.join(f'{k}={v}' for k, v in JENIS_CODES.items())}; 03/04 = legacy)."
+        )
+    if grade_code not in BB_TO_GRADE_MASTER:
+        raise ValueError(
+            f"Grade (BB) {grade_code!r} tidak valid; harus salah satu dari "
+            f"{', '.join(sorted(BB_TO_GRADE_MASTER))}."
+        )
+    supplier = str(supplier_code).strip()
+    if not supplier.isdigit() or not 1 <= len(supplier) <= 3:
+        raise ValueError(f"Kode supplier {supplier_code!r} harus 1-3 digit angka.")
+    if process_code not in GENERATABLE_PROCESS_CODES:
+        raise ValueError(
+            f"Kode proses {process_code!r} belum bisa dibuat otomatis "
+            f"(Fase 31: hanya {', '.join(GENERATABLE_PROCESS_CODES)})."
+        )
+    if not 2000 <= receiving_date.year <= 2099:
+        raise ValueError(f"Tanggal {receiving_date} di luar rentang 2000-2099.")
+    return (
+        f"{jenis_code}{grade_code}{supplier.zfill(3)}-"
+        f"{receiving_date:%y%m%d}-{process_code}"
     )

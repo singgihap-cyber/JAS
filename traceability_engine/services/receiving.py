@@ -11,6 +11,14 @@ genealogy/reconciliation/stock.
 Decisions made in this phase, and why (CLAUDE.md rule 11: document
 ambiguity instead of guessing):
 
+0. **[Fase 31] Generator dibuka untuk Receiving (PP=00).** Bila
+   `batch_number` kosong dan `jenis_code` (01/02) + `grade_code` (BB) diisi,
+   nomor dibuat `batch_number.generate()`. Penerimaan kedua dengan nomor yang
+   sama (supplier+jenis+grade+tanggal sama) DIGABUNG ke batch yang ada
+   (stok bertambah, event RECEIVING baru) selama batch ACTIVE dan belum
+   diproses lanjut; jika tidak, `BatchNumberConflictError`. Nomor manual
+   tetap berlaku seperti #1 (tanpa penggabungan).
+
 1. **`batch_number` is external/manual input, or left null.**
    `batch_number.generate()` intentionally raises (AA/Jenis segment still
    [UNCONFIRMED], BATCH_NUMBER_SPEC.md) -- this is the carried-over Fase 3
@@ -82,11 +90,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import batch_number as batch_number_mod
 from ..enums import BatchType, EventType, LinkRole
-from ..models import ProcessEvent
+from ..exceptions import BatchNumberConflictError
+from ..models import Batch, EventBatchLink, ProcessEvent, Supplier
 from .events import InputSpec, NewBatchSpec, OutputSpec, record_process_event
 
 
@@ -114,6 +124,69 @@ class ReceivingInput:
     # ANGKUT. Recorded on notes only, like packaging_condition (#5).
     transport_no: Optional[str] = None
     transport_condition: Optional[str] = None
+    # Fase 31 -- generator nomor batch. Bila `batch_number` kosong DAN
+    # `jenis_code` terisi, nomor dibuat otomatis (PP=00) dari Jenis (01/02),
+    # grade BB, kode supplier master, dan tanggal kedatangan. RAW_HIJAU:
+    # grade default `00` (Hijau = grade, bukan jenis).
+    jenis_code: Optional[str] = None
+    grade_code: Optional[str] = None
+
+
+def resolve_generated_batch_number(
+    session: Session, data: ReceivingInput
+) -> Optional[str]:
+    """Nomor batch hasil generator untuk `data`, atau None bila tidak diminta
+    (batch_number manual terisi, atau jenis_code kosong)."""
+    if data.batch_number or not data.jenis_code:
+        return None
+    grade = data.grade_code
+    if data.batch_type == BatchType.RAW_HIJAU:
+        if grade not in (None, "00"):
+            raise ValueError("Batch Hijau harus grade (BB) 00.")
+        grade = "00"
+    if not grade:
+        raise ValueError("Grade (BB) wajib diisi untuk membuat nomor batch otomatis.")
+    supplier = session.get(Supplier, data.supplier_id)
+    if supplier is None:
+        raise ValueError(f"Supplier id={data.supplier_id} tidak ditemukan.")
+    return batch_number_mod.generate(
+        jenis_code=data.jenis_code,
+        grade_code=grade,
+        supplier_code=supplier.supplier_code,
+        receiving_date=data.event_date,
+        process_code="00",
+    )
+
+
+def _find_mergeable_batch(session: Session, number: str) -> Optional[Batch]:
+    """Batch yang sudah memakai `number` dan boleh ditambah stok (penerimaan
+    kedua di hari yang sama = satu batch, keputusan user Fase 31). Hanya bila
+    ACTIVE dan belum diproses lebih lanjut (event-nya cuma RECEIVING/
+    SUPPLIER_RETURN); selain itu BatchNumberConflictError."""
+    existing = session.execute(
+        select(Batch).where(Batch.batch_number == number)
+    ).scalars().first()
+    if existing is None:
+        return None
+    from ..enums import BatchStatus
+
+    event_types = set(
+        session.execute(
+            select(ProcessEvent.event_type)
+            .join(EventBatchLink, EventBatchLink.event_id == ProcessEvent.event_id)
+            .where(EventBatchLink.batch_id == existing.batch_id)
+        ).scalars()
+    )
+    if existing.status != BatchStatus.ACTIVE or not event_types <= {
+        EventType.RECEIVING,
+        EventType.SUPPLIER_RETURN,
+    }:
+        raise BatchNumberConflictError(
+            f"Nomor batch {number} sudah dipakai batch #{existing.batch_id} yang "
+            f"sudah diproses/tidak aktif, sehingga penerimaan baru tidak bisa "
+            f"digabung. Isi nomor batch manual atau ubah tanggal."
+        )
+    return existing
 
 
 def _build_notes(data: ReceivingInput) -> str:
@@ -145,16 +218,20 @@ def record_receiving(session: Session, data: ReceivingInput) -> ProcessEvent:
     if data.off_spec_qty is not None and data.off_spec_qty > data.net_quantity:
         raise ValueError("off_spec_qty cannot exceed net_quantity (PB 'net' field).")
 
+    generated = resolve_generated_batch_number(session, data)
+    merge_into = _find_mergeable_batch(session, generated) if generated else None
+    number = data.batch_number or generated
+
     parsed = None
-    if data.batch_number:
+    if number:
         try:
-            parsed = batch_number_mod.parse(data.batch_number)
+            parsed = batch_number_mod.parse(number)
         except ValueError:
             parsed = None  # accept as free-form manual entry -- see module docstring #1
 
     new_batch = NewBatchSpec(
         batch_type=data.batch_type,
-        batch_number=data.batch_number,
+        batch_number=number,
         supplier_id=data.supplier_id,
         unit=data.unit,
         jenis_code=parsed.jenis_code if parsed else None,
@@ -172,7 +249,11 @@ def record_receiving(session: Session, data: ReceivingInput) -> ProcessEvent:
         event_time=data.event_time,
         pic_user_id=data.pic_user_id,
         inputs=[],
-        outputs=[OutputSpec(quantity=data.net_quantity, unit=data.unit, new_batch=new_batch)],
+        outputs=[
+            OutputSpec(quantity=data.net_quantity, unit=data.unit, batch_id=merge_into.batch_id)
+            if merge_into is not None
+            else OutputSpec(quantity=data.net_quantity, unit=data.unit, new_batch=new_batch)
+        ],
         notes=_build_notes(data),
     )
 
