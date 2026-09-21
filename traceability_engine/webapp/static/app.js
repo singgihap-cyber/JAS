@@ -1856,11 +1856,11 @@ document.getElementById('batchNumberCorrectForm').addEventListener('submit', asy
     const picId = document.getElementById('bncPic').value;
     if (!batchId || !picId) { toast('Batch dan Production Manager harus dipilih.', 'error'); return; }
     try {
-        await api('POST', `/batches/${batchId}/correct-number`, {
+        const res = await api('POST', `/batches/${batchId}/correct-number`, {
             new_batch_number: document.getElementById('bncNewNumber').value.trim(),
             actor_user_id: Number(picId), reason: document.getElementById('bncReason').value.trim(),
         });
-        toast(`✅ Nomor batch #${batchId} dikoreksi.`, 'success');
+        toast(`✅ Nomor batch #${batchId} dikoreksi. ${res.notice || ''}`, 'success', 12000);
         document.getElementById('batchNumberCorrectForm').reset();
         await renderAaChain(); renderAaChainBanner(); await renderAuditLog();
     } catch (err) { toastError(err, 6000); }

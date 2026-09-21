@@ -821,6 +821,7 @@ class BatchNumberCorrectionOut(BaseModel):
     reason: str
     actor_user_id: int
     corrected_at: Optional[dt.datetime] = None
+    notice: Optional[str] = None  # hanya pada respons koreksi: ganti label/nomor lama yang sudah tercetak
 
     model_config = {"from_attributes": True}
 

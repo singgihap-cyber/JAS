@@ -10,15 +10,23 @@ Keputusan user (2026-09-21):
    baru, pelaku, waktu masuk `batch_number_corrections` + AuditLog (Batch,
    UPDATE). Batch/event/silsilah tertaut lewat ID sehingga tidak putus. Nomor
    baru yang sama dengan batch LAIN ditolak (BatchNumberConflictError).
-4. Batch turunan TIDAK ikut diubah otomatis; koreksi berlaku pada satu batch.
+4. (Dikonfirmasi user 2026-09-21) Batch turunan yang SUDAH ada tidak diubah;
+   batch turunan berikutnya mengikuti nomor baru (generator membaca komponen
+   batch sumber). Hasil koreksi memuat CATATAN agar label/nomor lama yang sudah
+   tercetak diganti.
+5. (Dikonfirmasi user 2026-09-21) Komponen terurai (AA, grade, kode supplier,
+   tanggal, kode proses) mengikuti nomor baru, dan `supplier_id` dicocokkan ke
+   supplier terdaftar dengan kode yang sama (dibandingkan sebagai angka, jadi
+   `24` = `024`).
 
-`[UNCONFIRMED]` keputusan saya: komponen terurai (AA, grade, kode supplier,
-tanggal, kode proses) diperbarui mengikuti nomor baru; `supplier_id` (relasi
-master) TIDAK diubah otomatis walau kode supplier pada nomor berbeda.
+`[UNCONFIRMED]` keputusan saya: bila kode supplier pada nomor baru BERBEDA dan
+tidak ada supplier terdaftar berkode itu, koreksi ditolak (422) -- daftarkan
+supplier dulu. Kode `000` (Mixing) mengosongkan `supplier_id`.
 """
 from __future__ import annotations
 
 import datetime as dt
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -28,11 +36,31 @@ from ..exceptions import (
     BatchNumberConflictError, InvalidEventStructureError, UnauthorizedDispositionError,
 )
 from ..models import (
-    AaFindingReview, AuditLog, Batch, BatchNumberCorrection, User,
+    AaFindingReview, AuditLog, Batch, BatchNumberCorrection, Supplier, User,
 )
 from .aa_chain import audit_aa_chain
 
 REVIEW_STATUSES = ("DITINJAU", "DIABAIKAN")
+
+PRINT_NOTICE = (
+    "Ganti nomor batch lama pada label/dokumen yang sudah tercetak dengan nomor baru. "
+    "Batch turunan yang sudah ada tidak berubah; batch turunan berikutnya memakai nomor baru."
+)
+
+
+def _supplier_for_code(session: Session, code: str) -> Optional[Supplier]:
+    """Supplier terdaftar dengan kode numerik yang sama (`24` = `024`)."""
+    try:
+        target = int(code)
+    except ValueError:
+        return None
+    for sup in session.query(Supplier).all():
+        try:
+            if int(sup.supplier_code) == target:
+                return sup
+        except ValueError:
+            continue
+    return None
 
 
 def _require_manager(session: Session, actor_user_id: int, what: str) -> User:
@@ -127,6 +155,24 @@ def correct_batch_number(
             f"Nomor {new_number} sudah dipakai batch #{clash.batch_id}; koreksi ditolak."
         )
 
+    supplier_note = ""
+    new_supplier_id = batch.supplier_id
+    old_code = batch.supplier_code
+    same_supplier = old_code is not None and old_code.isdigit() and int(old_code) == int(parts.supplier_code)
+    if not same_supplier:
+        if int(parts.supplier_code) == 0:
+            new_supplier_id = None  # 000 = batch Mixing (tanpa supplier)
+        else:
+            sup = _supplier_for_code(session, parts.supplier_code)
+            if sup is None:
+                raise InvalidEventStructureError(
+                    f"Kode supplier {parts.supplier_code} pada nomor baru belum terdaftar; "
+                    "daftarkan supplier terlebih dahulu, lalu ulangi koreksi."
+                )
+            new_supplier_id = sup.supplier_id
+        if new_supplier_id != batch.supplier_id:
+            supplier_note = f"; supplier_id {batch.supplier_id} -> {new_supplier_id}"
+
     affected = [
         f for f in audit_aa_chain(session, hijau_only=False)
         if batch_id in (f.source_batch_id, f.result_batch_id)
@@ -138,6 +184,7 @@ def correct_batch_number(
     batch.supplier_code = parts.supplier_code
     batch.receiving_date = parts.receiving_date
     batch.process_code = parts.process_code
+    batch.supplier_id = new_supplier_id
 
     entry = BatchNumberCorrection(
         batch_id=batch_id, old_batch_number=old_number, new_batch_number=new_number,
@@ -146,11 +193,12 @@ def correct_batch_number(
     session.add(AuditLog(
         entity_type="Batch", entity_id=batch_id, action=AuditAction.UPDATE,
         actor_user_id=actor_user_id, before_value=f"batch_number {old_number}",
-        after_value=f"batch_number {new_number} (koreksi: {reason.strip()})"))
+        after_value=f"batch_number {new_number} (koreksi: {reason.strip()}){supplier_note}"))
     session.flush()
     for f in affected:  # temuan yang menyentuh batch ini ditandai DIKOREKSI
         _upsert_review(session, f, "DIKOREKSI", actor_user_id,
                        f"Nomor batch #{batch_id} diganti {old_number} -> {new_number}: {reason.strip()}")
+    entry.notice = PRINT_NOTICE  # atribut sementara untuk respons API (bukan kolom)
     return entry
 
 

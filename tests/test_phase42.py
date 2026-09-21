@@ -98,3 +98,44 @@ def test_correct_number_guards(session, staff_user, production_manager, supplier
                              actor_user_id=pm, reason="x")
     assert session.query(BatchNumberCorrection).count() == 0
     assert session.get(Batch, f.result_batch_id).batch_number == "0102024-260918-00"
+
+
+def test_correct_number_matches_registered_supplier(session, staff_user, production_manager, supplier):
+    """Keputusan user: kode supplier baru dicocokkan ke supplier terdaftar (24 = 024)."""
+    from traceability_engine.models import Supplier
+    other = Supplier(supplier_code="018", name="LAIN")
+    session.add(other)
+    session.flush()
+    f = _finding(session, staff_user, supplier)
+    entry = correct_batch_number(session, batch_id=f.result_batch_id, new_batch_number="0102018-260918-00",
+                                 actor_user_id=production_manager.user_id, reason="Salah supplier")
+    b = session.get(Batch, f.result_batch_id)
+    assert b.supplier_id == other.supplier_id and b.supplier_code == "018"
+    assert "ganti nomor batch lama" in entry.notice.lower()
+    assert session.query(AuditLog).filter(AuditLog.after_value.like("%supplier_id%")).count() == 1
+    # kode sama dengan lebar berbeda (18 = 018) tidak dianggap berubah supplier
+    correct_batch_number(session, batch_id=f.result_batch_id, new_batch_number="010218-260918-00",
+                         actor_user_id=production_manager.user_id, reason="Lebar kode")
+    assert session.get(Batch, f.result_batch_id).supplier_id == other.supplier_id
+
+
+def test_correct_number_unregistered_supplier_rejected(session, staff_user, production_manager, supplier):
+    f = _finding(session, staff_user, supplier)
+    with pytest.raises(InvalidEventStructureError, match="belum terdaftar"):
+        correct_batch_number(session, batch_id=f.result_batch_id, new_batch_number="0102999-260918-00",
+                             actor_user_id=production_manager.user_id, reason="x")
+    b = session.get(Batch, f.result_batch_id)
+    assert b.batch_number == "0102024-260918-00" and b.supplier_id == supplier.supplier_id
+
+
+def test_next_derived_batch_follows_corrected_number(session, staff_user, production_manager, supplier):
+    """Batch turunan berikutnya membaca komponen batch sumber yang sudah dikoreksi;
+    nomor turunan yang sudah ada tidak diubah."""
+    from traceability_engine.services.batch_numbering import derive_number
+    f = _finding(session, staff_user, supplier)
+    src = session.get(Batch, f.result_batch_id)  # 0102024-260918-00
+    before = derive_number(src, grade_code="01", process_code="01")
+    assert before == "0101024-260918-01"
+    correct_batch_number(session, batch_id=src.batch_id, new_batch_number="0202024-260919-00",
+                         actor_user_id=production_manager.user_id, reason="AA dan tanggal salah")
+    assert derive_number(src, grade_code="01", process_code="01") == "0201024-260919-01"

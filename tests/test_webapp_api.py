@@ -2075,6 +2075,7 @@ def test_api_aa_review_and_batch_number_correction(client, supplier_id, pic_id, 
     assert bad.status_code == 422
     done = client.post(f"/api/batches/{rid}/correct-number", json={**body, "actor_user_id": pm_id})
     assert done.status_code == 201 and done.json()["old_batch_number"] == "0102024-260918-00"
+    assert "label/dokumen" in done.json()["notice"]
     assert client.get("/api/audit/aa-chain").json() == []
     hist = client.get(f"/api/batches/{rid}/number-history").json()
     assert [h["new_batch_number"] for h in hist] == ["0202024-260918-00"]
