@@ -72,7 +72,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
-        if (page === 'adjustment') renderAuditLog();
+        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); }
         if (page === 'stock') renderStockSummary();
         if (page === 'batch-history') renderRendemenSortation();
     });
@@ -102,7 +102,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -1495,6 +1495,7 @@ document.getElementById('rejectForm').addEventListener('submit', async (e) => {
         document.getElementById('rejectForm').reset();
         await refreshBatches();
         await renderAuditLog();
+        await renderDisposition();
     } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
 });
 
@@ -1513,6 +1514,74 @@ document.getElementById('supersedeForm').addEventListener('submit', async (e) =>
     } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
 });
 
+// ─── DISPOSISI BATCH REJECTED (Fase 34, UI atas Fase 26) ────────────────
+// Server = satu-satunya penegak role (bukan PRODUCTION_MANAGER -> 403);
+// laporan hanya peringatan, tidak memblokir (services/disposition.py).
+const DISPOSITION_LABELS = {
+    PENDING_RETURN: ['Menunggu dikembalikan', 'badge-primary'],
+    PARTIALLY_RETURNED: ['Sebagian dikembalikan', 'badge-primary'],
+    RETURNED: ['Sudah dikembalikan', 'badge-success'],
+    NO_STOCK: ['Tanpa stok', 'badge-gray'],
+};
+const DISPOSITION_OPEN = ['PENDING_RETURN', 'PARTIALLY_RETURNED'];
+
+async function renderDisposition() {
+    const tbody = document.getElementById('dispositionTable');
+    const sel = document.getElementById('rtBatch');
+    if (!tbody || !sel) return;
+    let rows;
+    try { rows = await api('GET', '/audit/disposition'); }
+    catch (err) { toast('❌ ' + err.message, 'error', 6000); return; }
+    tbody.innerHTML = rows.length ? rows.map(r => {
+        const [label, cls] = DISPOSITION_LABELS[r.disposition] || [r.disposition, 'badge-gray'];
+        const warn = r.used_after_rejection_event_ids.length
+            ? `<span class="badge badge-danger" title="${r.message}">⚠️ Dipakai setelah ditolak: event ${r.used_after_rejection_event_ids.map(i => '#' + i).join(', ')}</span>`
+            : '<span style="color:var(--text-secondary)">–</span>';
+        return `<tr>
+            <td class="batch-id">#${r.batch_id} ${r.batch_number || ''}</td>
+            <td>${r.supplier_name || '<span style="color:var(--text-secondary)">–</span>'}</td>
+            <td>${r.rejected_at ? new Date(r.rejected_at).toLocaleString('id-ID') : '–'}</td>
+            <td>${r.reject_reason || '–'}</td>
+            <td>${fmtQty(r.quantity_on_hand)} kg</td>
+            <td>${fmtQty(r.returned_quantity)} kg</td>
+            <td><span class="badge ${cls}">${label}</span></td>
+            <td>${warn}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada batch REJECTED</td></tr>';
+    const open = rows.filter(r => DISPOSITION_OPEN.includes(r.disposition));
+    const current = sel.value;
+    sel.innerHTML = open.length
+        ? '<option value="">Pilih batch...</option>' + open.map(r =>
+            `<option value="${r.batch_id}">#${r.batch_id} ${r.batch_number || ''} — sisa ${fmtQty(r.quantity_on_hand)} kg</option>`).join('')
+        : '<option value="">Tidak ada batch REJECTED yang menunggu pengembalian</option>';
+    if (current && open.some(r => String(r.batch_id) === current)) sel.value = current;
+}
+
+document.getElementById('rtTanggal').value = todayStr();
+document.getElementById('returnForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const batchId = document.getElementById('rtBatch').value;
+    const picId = document.getElementById('rtPic').value;
+    const reason = document.getElementById('rtReason').value.trim();
+    const qty = document.getElementById('rtQty').value;
+    if (!batchId || !picId || !reason) { toast('Batch, Production Manager, dan alasan harus diisi.', 'error'); return; }
+    if (qty !== '' && Number(qty) <= 0) { toast('Qty harus lebih dari 0 (atau kosongkan untuk seluruh stok).', 'error'); return; }
+    try {
+        await api('POST', `/batches/${batchId}/return-to-supplier`, {
+            event_date: document.getElementById('rtTanggal').value,
+            actor_user_id: Number(picId),
+            reason,
+            quantity: qty === '' ? null : qty,
+        });
+        toast(`✅ Batch #${batchId} dikembalikan ke supplier.`, 'success');
+        document.getElementById('returnForm').reset();
+        document.getElementById('rtTanggal').value = todayStr();
+        await refreshBatches();
+        await renderAuditLog();
+        await renderDisposition();
+    } catch (err) { toast('❌ ' + err.message, 'error', 6000); }
+});
+
 async function renderAuditLog() {
     const logs = await api('GET', '/audit-logs?entity_type=Batch');
     document.getElementById('auditLogTable').innerHTML = logs.length ? logs.slice(0, 30).map(l => `
@@ -1527,6 +1596,16 @@ async function renderAuditLog() {
 }
 
 // ─── BATCH LIST ─────────────────────────────────────────────────────────
+// Fase 34: label Jenis (AA) dari BatchOut.jenis_label / jenis_is_legacy
+// (read-side saja; 01 Tahitensis, 02 Planifolia, 03/04 = legacy, Fase 30).
+function jenisCell(b) {
+    if (!b.jenis_code) return '<span style="color:var(--text-secondary)">–</span>';
+    if (!b.jenis_label) return `<span class="badge badge-gray" title="Kode AA tidak dikenal">${b.jenis_code}</span>`;
+    return b.jenis_is_legacy
+        ? `<span class="badge badge-gray" title="Kode AA lama (legacy), diterima apa adanya">${b.jenis_code} ${b.jenis_label}</span>`
+        : `<span class="badge badge-primary">${b.jenis_code} ${b.jenis_label}</span>`;
+}
+
 async function renderBatchList() {
     const status = document.getElementById('blStatus').value;
     const type = document.getElementById('blType').value;
@@ -1538,12 +1617,13 @@ async function renderBatchList() {
         <tr>
             <td class="batch-id">${b.batch_id}</td>
             <td>${b.batch_number || '<span style="color:var(--text-secondary)">–</span>'}</td>
+            <td>${jenisCell(b)}</td>
             <td><span class="badge badge-primary">${b.batch_type}</span></td>
             <td>${supplierName(b.supplier_id)}</td>
             <td>${fmtQty(b.current_quantity)} ${b.unit}</td>
             <td><span class="badge badge-${b.status === 'ACTIVE' ? 'success' : 'gray'}">${b.status}</span></td>
             <td>${new Date(b.created_at).toLocaleString('id-ID')}</td>
-        </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Belum ada batch</td></tr>';
+        </tr>`).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada batch</td></tr>';
 }
 ['blStatus', 'blType'].forEach(id => document.getElementById(id).addEventListener('change', renderBatchList));
 
@@ -1560,6 +1640,7 @@ async function findBatch() {
             <div class="form-divider" style="margin-top:0">📋 Batch #${b.batch_id}</div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-size:13px;margin-bottom:14px">
                 <div><div class="form-label">Nomor Batch</div>${b.batch_number || '–'}</div>
+                <div><div class="form-label">Jenis (AA)</div>${jenisCell(b)}</div>
                 <div><div class="form-label">Alur</div><span class="badge badge-primary">${b.batch_type}</span></div>
                 <div><div class="form-label">Supplier</div>${b.supplier_name || '–'}</div>
                 <div><div class="form-label">Qty Saat Ini</div><strong>${fmtQty(b.current_quantity)} ${b.unit}</strong></div>

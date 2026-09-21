@@ -1853,3 +1853,25 @@ def test_aa_inheritance_api_fase33(client, supplier_id, pic_id):
     assert bad.status_code == 201, bad.text  # peringatan, bukan blokir
     assert len(bad.json()["warnings"]) == 1
     assert bad.json()["batches"][0]["batch_number"] == "0102024-260919-00"
+
+
+def test_batch_out_exposes_jenis_label_and_legacy_flag(client, supplier_id, pic_id):
+    """Fase 34: BatchOut.jenis_label/jenis_is_legacy (turunan jenis_code) di list, detail, dan respons Receiving."""
+    body = {"event_date": "2026-09-21", "pic_user_id": pic_id, "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING", "net_quantity": 10}
+    new = client.post("/api/receiving", json={**body, "jenis_code": "01", "grade_code": "01"})
+    assert new.status_code == 201
+    out = new.json()["batch"]
+    assert (out["jenis_code"], out["jenis_label"], out["jenis_is_legacy"]) == ("01", "Tahitensis", False)
+
+    legacy = client.post("/api/receiving", json={**body, "batch_number": "0301024-250101-00"})
+    assert legacy.status_code == 201
+    lid = legacy.json()["batch"]["batch_id"]
+    row = next(b for b in client.get("/api/batches").json() if b["batch_id"] == lid)
+    assert (row["jenis_code"], row["jenis_label"], row["jenis_is_legacy"]) == ("03", "Planifolia (kode lama)", True)
+    assert client.get(f"/api/batches/{lid}").json()["jenis_label"] == "Planifolia (kode lama)"
+
+    plain = client.post("/api/receiving", json={**body, "batch_number": None})
+    assert plain.status_code == 201
+    p = plain.json()["batch"]
+    assert p["jenis_code"] is None and p["jenis_label"] is None and p["jenis_is_legacy"] is False

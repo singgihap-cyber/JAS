@@ -815,6 +815,46 @@
             </div>
 
             <div class="section">
+                <div class="section-title">↩️ Kembalikan Batch REJECTED ke Supplier</div>
+                <div class="info-box">
+                    Disposisi batch REJECTED = dikembalikan ke supplier (Fase 26). Pemutus hanya
+                    <b>Production Manager</b> — server menolak (403) PIC lain; dropdown PIC tidak difilter.
+                    Qty kosong = seluruh stok batch; boleh sebagian. Status batch tetap REJECTED; buktinya event
+                    <code>SUPPLIER_RETURN</code>. Laporan di bawah hanya <b>peringatan</b>, tidak memblokir.
+                </div>
+                <form id="returnForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Batch REJECTED (belum tuntas dikembalikan)</label>
+                        <select class="form-select" id="rtBatch" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Production Manager</label>
+                        <select class="form-select" id="rtPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:140px;margin-bottom:0">
+                        <label class="form-label">Tanggal</label>
+                        <input type="date" class="form-input" id="rtTanggal" required>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0">
+                        <label class="form-label">Qty (kg, opsional)</label>
+                        <input type="number" step="0.001" min="0" class="form-input" id="rtQty" placeholder="seluruh stok">
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan</label>
+                        <input class="form-input" id="rtReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Kembalikan ke Supplier</button>
+                </form>
+                <div class="form-divider">📑 Status Disposisi Batch REJECTED</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Batch</th><th>Supplier</th><th>Ditolak</th><th>Alasan</th><th>Sisa</th><th>Dikembalikan</th><th>Status</th><th>Peringatan</th></tr></thead>
+                        <tbody id="dispositionTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
                 <div class="section-title">🔄 Tandai Batch SUPERSEDED</div>
                 <div class="info-box">
                     Untuk batch yang sudah di-relabel jadi nomor batch baru (mis. Downgrade/Upgrade via Sortasi,
@@ -879,7 +919,7 @@
                 </div>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>Batch ID</th><th>Batch Number</th><th>Alur</th><th>Supplier</th><th>Qty</th><th>Status</th><th>Dibuat</th></tr></thead>
+                        <thead><tr><th>Batch ID</th><th>Batch Number</th><th>Jenis</th><th>Alur</th><th>Supplier</th><th>Qty</th><th>Status</th><th>Dibuat</th></tr></thead>
                         <tbody id="batchListTable"></tbody>
                     </table>
                 </div>

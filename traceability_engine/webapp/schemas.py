@@ -15,7 +15,9 @@ import datetime as dt
 from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from ..batch_number import JENIS_CODES, LEGACY_JENIS_CODES
 
 QCStageLiteral = Literal["RM", "IP", "FP"]
 BatchTypeLiteral = Literal["RAW_KERING", "RAW_HIJAU"]
@@ -109,6 +111,19 @@ class BatchOut(BaseModel):
     gross_weight: Optional[Decimal] = None
     tare_weight: Optional[Decimal] = None
     net_weight: Optional[Decimal] = None
+
+    # Fase 34: label Jenis (AA) untuk UI -- murni turunan dari `jenis_code`,
+    # tanpa kolom/aturan baru (batch_number.JENIS_CODES / LEGACY_JENIS_CODES).
+    @computed_field  # type: ignore[misc]
+    @property
+    def jenis_label(self) -> Optional[str]:
+        code = self.jenis_code
+        return (JENIS_CODES.get(code) or LEGACY_JENIS_CODES.get(code)) if code else None
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def jenis_is_legacy(self) -> bool:
+        return self.jenis_code in LEGACY_JENIS_CODES
 
 
 class EventBatchLinkOut(BaseModel):
