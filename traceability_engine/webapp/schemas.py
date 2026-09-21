@@ -842,3 +842,15 @@ class SupplierReturnRowOut(BaseModel):
     confirmed_by: Optional[int] = None
     note: Optional[str] = None
     days_outstanding: Optional[int] = None
+    overdue: bool = False  # Fase 39
+
+
+class SupplierReturnRemindersOut(BaseModel):
+    """Fase 39 -- mirrors services/supplier_return.py `SupplierReturnReminders`."""
+
+    threshold_days: int
+    count: int
+    oldest_days: Optional[int] = None
+    total_quantity: Decimal
+    message: str
+    items: list[SupplierReturnRowOut]

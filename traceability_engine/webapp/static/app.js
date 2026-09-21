@@ -284,7 +284,25 @@ document.getElementById('userForm').addEventListener('submit', async (e) => {
 });
 
 // ─── DASHBOARD ──────────────────────────────────────────────────────────
+// Fase 39 -- banner pengingat retur belum diterima supplier (hanya tampilan)
+async function renderSupplierReturnBanner() {
+    const box = document.getElementById('supplierReturnBanner');
+    if (!box) return;
+    try {
+        const r = await api('GET', '/supplier-returns/reminders');
+        box.style.display = r.count ? '' : 'none';
+        if (r.count) document.getElementById('supplierReturnBannerText').textContent =
+            `${r.message} Total ${fmtQty(r.total_quantity)} kg.`;
+    } catch (err) { box.style.display = 'none'; }
+}
+document.getElementById('supplierReturnBannerLink').addEventListener('click', (e) => {
+    e.preventDefault();
+    const nav = document.querySelector('.nav-item[data-page="adjustment"]');
+    if (nav) nav.click();
+});
+
 async function renderDashboard() {
+    renderSupplierReturnBanner();
     const data = await api('GET', '/batches?status=ACTIVE');
     const tbody = document.getElementById('dashboardTable');
     tbody.innerHTML = data.length ? data.slice(0, 15).map(b => `
@@ -1626,10 +1644,14 @@ async function renderSupplierReturns() {
     let rows;
     try { rows = await api('GET', '/supplier-returns'); }
     catch (err) { toastError(err, 6000); return; }
+    // Fase 39: yang terlambat (>= batas pengingat) di paling atas, tertua dulu
+    rows.sort((a, b) => (b.overdue - a.overdue) || ((b.days_outstanding || 0) - (a.days_outstanding || 0)) || (b.event_id - a.event_id));
     tbody.innerHTML = rows.length ? rows.map(r => {
         const sent = r.status === 'DIKIRIM';
         const badge = sent
-            ? `<span class="badge badge-primary">Dikirim${r.days_outstanding != null ? ' (' + r.days_outstanding + ' hari)' : ''}</span>`
+            ? (r.overdue
+                ? `<span class="badge badge-danger">⏰ Terlambat — belum diterima (${r.days_outstanding} hari)</span>`
+                : `<span class="badge badge-primary">Dikirim${r.days_outstanding != null ? ' (' + r.days_outstanding + ' hari)' : ''}</span>`)
             : '<span class="badge badge-success">Diterima supplier</span>';
         return `<tr>
             <td>#${r.event_id}</td>
@@ -1667,6 +1689,7 @@ document.getElementById('supplierReturnConfirmForm').addEventListener('submit', 
         document.getElementById('supplierReturnConfirmForm').reset();
         document.getElementById('srcTanggal').value = todayStr();
         await renderSupplierReturns();
+        renderSupplierReturnBanner();
         await renderAuditLog();
     } catch (err) { toastError(err, 6000); }
 });

@@ -1976,3 +1976,20 @@ def test_api_sortation_start_required_and_order(client, supplier_id, pic_id):
     ok = client.post("/api/sortation", json={**base, "event_date": "2026-06-15", "end_date": "2026-06-18"})
     assert ok.status_code == 201, ok.text
 
+
+def test_api_supplier_return_reminders(client, supplier_id, pic_id):
+    """Fase 39 -- retur DIKIRIM >= 3 hari muncul di pengingat sampai DITERIMA."""
+    client.post("/api/receiving", json={
+        "event_date": "2026-01-05", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000", "off_spec_qty": "3.000"})
+    rem = client.get("/api/supplier-returns/reminders").json()
+    assert rem["threshold_days"] == 3 and rem["count"] == 1 and rem["items"][0]["overdue"] is True
+    assert rem["total_quantity"] == "3.000" and "belum dikonfirmasi" in rem["message"]
+    assert len(client.get("/api/supplier-returns?overdue=true").json()) == 1
+    eid = rem["items"][0]["event_id"]
+    assert client.post(f"/api/supplier-returns/{eid}/confirm-received", json={
+        "received_date": "2026-01-08", "actor_user_id": pic_id}).status_code == 201
+    rem = client.get("/api/supplier-returns/reminders").json()
+    assert rem["count"] == 0 and rem["oldest_days"] is None
+    assert client.get("/api/supplier-returns?overdue=true").json() == []
+

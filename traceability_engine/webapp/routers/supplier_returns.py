@@ -9,9 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ...models import ProcessEvent
-from ...services.supplier_return import confirm_return_received, list_supplier_returns
+from ...services.supplier_return import (
+    confirm_return_received, list_supplier_returns, supplier_return_reminders,
+)
 from ..database import get_db
-from ..schemas import SupplierReturnConfirm, SupplierReturnReceiptOut, SupplierReturnRowOut
+from ..schemas import (
+    SupplierReturnConfirm, SupplierReturnReceiptOut, SupplierReturnRemindersOut,
+    SupplierReturnRowOut,
+)
 
 router = APIRouter(tags=["supplier-returns"])
 
@@ -21,11 +26,20 @@ def get_supplier_returns(
     status: Optional[str] = None,
     supplier_id: Optional[int] = None,
     batch_id: Optional[int] = None,
+    overdue: Optional[bool] = None,
     db: Session = Depends(get_db),
 ):
-    """Semua retur ke supplier + statusnya (DIKIRIM / DITERIMA)."""
+    """Semua retur ke supplier + statusnya (DIKIRIM / DITERIMA). `overdue=true`
+    = hanya yang sudah lewat batas pengingat (Fase 39)."""
     return [asdict(r) for r in list_supplier_returns(
-        db, status=status, supplier_id=supplier_id, batch_id=batch_id)]
+        db, status=status, supplier_id=supplier_id, batch_id=batch_id, overdue=overdue)]
+
+
+@router.get("/supplier-returns/reminders", response_model=SupplierReturnRemindersOut)
+def get_supplier_return_reminders(db: Session = Depends(get_db)):
+    """Pengingat (Fase 39): retur DIKIRIM >= 3 hari yang belum dikonfirmasi
+    diterima supplier, tertua dulu. Hanya laporan, tidak memblokir."""
+    return asdict(supplier_return_reminders(db))
 
 
 @router.post(

@@ -151,3 +151,42 @@ def test_sortation_end_date_before_start_is_rejected(session, staff_user, suppli
     assert session.query(ProcessEvent).filter_by(event_type=EventType.SORTATION).count() == 0
     _sort(session, staff_user.user_id, bid, event_date=dt.date(2026, 6, 19), end_date=dt.date(2026, 6, 20))
     assert session.query(ProcessEvent).filter_by(event_type=EventType.SORTATION).count() == 1
+
+
+# ------------------------------------------------ Fase 39: pengingat retur
+def test_reminder_threshold_is_three_days(session, staff_user, supplier):
+    from traceability_engine.services.supplier_return import (
+        REMINDER_AFTER_DAYS, supplier_return_reminders,
+    )
+    assert REMINDER_AFTER_DAYS == 3
+    ev = _offspec_return(session, staff_user.user_id, supplier)  # dikirim 18/6
+    for as_of, expect in ((dt.date(2026, 6, 18), False), (dt.date(2026, 6, 20), False),
+                          (dt.date(2026, 6, 21), True), (dt.date(2026, 7, 18), True)):
+        [row] = list_supplier_returns(session, as_of=as_of)
+        assert row.overdue is expect, as_of
+        assert bool(supplier_return_reminders(session, as_of=as_of).count) is expect
+    rem = supplier_return_reminders(session, as_of=dt.date(2026, 6, 28))
+    assert rem.count == 1 and rem.oldest_days == 10 and rem.total_quantity == D("8")
+    assert "tertua 10 hari" in rem.message and "WARDOYO" in rem.message
+    assert rem.items[0].event_id == ev.event_id
+
+
+def test_reminder_stops_after_received_and_sorts_oldest_first(session, staff_user, supplier):
+    from traceability_engine.services.supplier_return import supplier_return_reminders
+    uid = staff_user.user_id
+    e1 = _offspec_return(session, uid, supplier)
+    record_receiving(session, ReceivingInput(
+        event_date=dt.date(2026, 6, 10), pic_user_id=uid, supplier_id=supplier.supplier_id,
+        batch_type=BatchType.RAW_KERING, net_quantity=D("50"), off_spec_qty=D("2"),
+        batch_number="030224-260610-00"))
+    as_of = dt.date(2026, 6, 25)
+    rem = supplier_return_reminders(session, as_of=as_of)
+    assert rem.count == 2 and [i.days_outstanding for i in rem.items] == [15, 7]
+    older = rem.items[0].event_id
+    confirm_return_received(session, event_id=older, received_date=dt.date(2026, 6, 24), actor_user_id=uid)
+    rem = supplier_return_reminders(session, as_of=as_of)
+    assert rem.count == 1 and rem.items[0].event_id == e1.event_id
+    confirm_return_received(session, event_id=e1.event_id, received_date=D18, actor_user_id=uid)
+    rem = supplier_return_reminders(session, as_of=as_of)
+    assert rem.count == 0 and rem.oldest_days is None and "Tidak ada" in rem.message
+    assert list_supplier_returns(session, overdue=True, as_of=as_of) == []

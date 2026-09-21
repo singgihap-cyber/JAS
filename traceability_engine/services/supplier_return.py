@@ -19,8 +19,15 @@ Keputusan yang diambil di sini (CLAUDE.md rule 11) -- `[UNCONFIRMED]`:
   konfirmasi = perlu keputusan terpisah, sengaja belum ada fitur batal.
 - Konfirmasi tidak mengubah stok atau status batch; hanya status retur.
 - Event yang sudah VOID tidak bisa dikonfirmasi dan tidak dilaporkan.
-- Laporan bersifat read-only; retur yang lama berstatus DIKIRIM hanya
-  ditampilkan (`days_outstanding`), tanpa ambang/blokir/pengingat.
+- Laporan bersifat read-only.
+
+**Fase 39 -- pengingat.** Keputusan user (2026-09-21): retur berstatus DIKIRIM
+diingatkan mulai `REMINDER_AFTER_DAYS` = 3 hari sejak tanggal kirim dan terus
+diingatkan sampai dikonfirmasi DITERIMA. Bentuk: banner Dashboard, penanda di
+tabel retur, dan `GET /api/supplier-returns/reminders`. HANYA tampilan: tidak
+memblokir apa pun, tidak ada tingkat kuning/merah, tidak ada kirim pesan keluar
+(server tidak punya kanal email/WhatsApp). Hari dihitung `as_of - event_date`;
+"terlambat" = hari >= 3 (retur dikirim 18/9 mulai diingatkan 21/9).
 """
 from __future__ import annotations
 
@@ -39,6 +46,7 @@ from ..models import AuditLog, EventBatchLink, ProcessEvent, SupplierReturnRecei
 
 STATUS_SENT = "DIKIRIM"
 STATUS_RECEIVED = "DITERIMA"
+REMINDER_AFTER_DAYS = 3  # Fase 39 -- keputusan user 2026-09-21
 
 
 def confirm_return_received(
@@ -111,6 +119,7 @@ class SupplierReturnRow:
     confirmed_by: Optional[int] = None
     note: Optional[str] = None
     days_outstanding: Optional[int] = None  # hanya DIKIRIM: hari sejak dikirim s.d. `as_of`
+    overdue: bool = False  # Fase 39: DIKIRIM dan days_outstanding >= REMINDER_AFTER_DAYS
 
 
 def list_supplier_returns(
@@ -120,6 +129,7 @@ def list_supplier_returns(
     supplier_id: Optional[int] = None,
     batch_id: Optional[int] = None,
     as_of: Optional[dt.date] = None,
+    overdue: Optional[bool] = None,
 ) -> list[SupplierReturnRow]:
     """Semua retur ke supplier (event SUPPLIER_RETURN non-VOID), terbaru dulu."""
     if status is not None and status not in (STATUS_SENT, STATUS_RECEIVED):
@@ -163,6 +173,10 @@ def list_supplier_returns(
             continue
         if batch_id is not None and (batch is None or batch.batch_id != batch_id):
             continue
+        days = (as_of - ev.event_date).days if receipt is None else None
+        is_overdue = days is not None and days >= REMINDER_AFTER_DAYS
+        if overdue is not None and is_overdue != overdue:
+            continue
         rows.append(
             SupplierReturnRow(
                 event_id=ev.event_id,
@@ -179,9 +193,43 @@ def list_supplier_returns(
                 received_date=receipt.received_date if receipt else None,
                 confirmed_by=receipt.confirmed_by if receipt else None,
                 note=receipt.note if receipt else None,
-                days_outstanding=(
-                    (as_of - ev.event_date).days if receipt is None else None
-                ),
+                days_outstanding=days,
+                overdue=is_overdue,
             )
         )
     return rows
+
+
+@dataclass
+class SupplierReturnReminders:
+    threshold_days: int
+    count: int
+    oldest_days: Optional[int]
+    total_quantity: Decimal
+    message: str
+    items: list[SupplierReturnRow]  # tertua dulu
+
+
+def supplier_return_reminders(
+    session: Session, *, as_of: Optional[dt.date] = None
+) -> SupplierReturnReminders:
+    """Retur DIKIRIM yang sudah >= REMINDER_AFTER_DAYS hari belum dikonfirmasi
+    diterima supplier (Fase 39). Read-only; kosong = tidak ada yang perlu diingatkan."""
+    items = sorted(
+        list_supplier_returns(session, status=STATUS_SENT, overdue=True, as_of=as_of),
+        key=lambda r: (-(r.days_outstanding or 0), r.event_id),
+    )
+    total = sum((r.quantity for r in items), Decimal("0"))
+    oldest = items[0].days_outstanding if items else None
+    if items:
+        names = sorted({r.supplier_name for r in items if r.supplier_name})
+        message = (
+            f"{len(items)} retur belum dikonfirmasi diterima supplier "
+            f"(tertua {oldest} hari" + (f", {', '.join(names)}" if names else "") + ")."
+        )
+    else:
+        message = "Tidak ada retur yang perlu diingatkan."
+    return SupplierReturnReminders(
+        threshold_days=REMINDER_AFTER_DAYS, count=len(items), oldest_days=oldest,
+        total_quantity=total, message=message, items=items,
+    )

@@ -34,6 +34,12 @@
 
         <!-- DASHBOARD -->
         <div class="page active" id="dashboard">
+            <div class="section" id="supplierReturnBanner" style="display:none">
+                <div class="info-box" style="border-left:4px solid var(--danger)">
+                    <b>⏰ Pengingat retur ke supplier</b> — <span id="supplierReturnBannerText"></span>
+                    <a href="#" id="supplierReturnBannerLink">Buka Status Retur ke Supplier →</a>
+                </div>
+            </div>
             <div class="section">
                 <div class="section-title">📈 Ringkasan Batch Aktif</div>
                 <div class="info-box">
@@ -864,7 +870,9 @@
                     Setiap pengembalian ke supplier (off-spec saat Receiving maupun batch REJECTED) berstatus
                     <b>Dikirim</b> sejak dicatat. Setelah supplier menerima barangnya, konfirmasikan di sini dengan
                     tanggal terima (tidak boleh sebelum tanggal kirim, satu konfirmasi per retur). Konfirmasi
-                    tidak mengubah stok dan tidak dibatasi role; tercatat di Audit Log.
+                    tidak mengubah stok dan tidak dibatasi role; tercatat di Audit Log. Retur yang sudah <b>3 hari</b> atau lebih
+                    belum dikonfirmasi diberi penanda <em>Terlambat</em>, diurutkan paling atas, dan diingatkan lewat banner
+                    di Dashboard sampai berstatus Diterima (hanya pengingat, tidak memblokir).
                 </div>
                 <form id="supplierReturnConfirmForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
                     <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
