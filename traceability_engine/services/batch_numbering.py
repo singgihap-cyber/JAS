@@ -9,10 +9,8 @@ Keputusan user (2026-09-21), dicatat di claude/32_GENERATOR_TURUNAN.md:
    apa adanya (legacy dinormalisasi hanya bila staf memilih 01/02 lewat
    `jenis_code`).
 2. **Mixing (03)**: staf memilih AA + BB; tanggal = tanggal Mixing; supplier
-   `000`. Sistem hanya memvalidasi bahwa AA semua batch sumber SAMA.
-   [UNCONFIRMED] AA lama `03` dianggap Planifolia (= `02`) saat membandingkan;
-   AA `04`/tak dikenal tidak ikut dibandingkan (jenis sebenarnya tidak
-   diketahui, `LEGACY_JENIS_CODES`).
+   `000`. Fase 32b (user, 2026-09-21): Mixing BOLEH mencampur Planifolia dan
+   Tahitensis, jadi AA sumber TIDAK divalidasi; AA hasil = pilihan staf.
 3. **Nomor kembar** (tanpa segmen urut): output digabung ke batch yang sudah
    ada bila batch itu ACTIVE, bertipe sama, dan belum diproses lanjut
    (tidak pernah jadi INPUT event selain SUPPLIER_RETURN, dan dibuat oleh
@@ -73,16 +71,6 @@ def derive_number(
     )
 
 
-def _comparable_jenis(code: Optional[str]) -> Optional[str]:
-    """AA yang bisa dibandingkan antar-batch sumber Mixing. `03` (legacy,
-    dibaca Planifolia) disamakan dengan `02`; `04`/None = tidak diketahui."""
-    if code in ("01", "02"):
-        return code
-    if code == "03":
-        return "02"
-    return None
-
-
 def mixing_number(
     session: Session,
     *,
@@ -93,22 +81,9 @@ def mixing_number(
     supplier_code: str = "000",
 ) -> str:
     """Nomor hasil Mixing (aturan #2). Menolak bila AA batch sumber berbeda."""
-    known: dict[str, list[int]] = {}
     for sid in source_batch_ids:
-        b = session.get(Batch, sid)
-        if b is None:
+        if session.get(Batch, sid) is None:
             raise ValueError(f"Batch {sid} does not exist.")
-        c = _comparable_jenis(b.jenis_code)
-        if c is not None:
-            known.setdefault(c, []).append(sid)
-    if len(known) > 1:
-        detail = "; ".join(
-            f"{bn.JENIS_CODES[k]}: batch #{', #'.join(map(str, v))}" for k, v in sorted(known.items())
-        )
-        raise ValueError(
-            f"Batch sumber Mixing punya Jenis (AA) berbeda ({detail}); nomor otomatis "
-            f"hanya untuk sumber berjenis sama."
-        )
     return bn.generate(
         jenis_code=jenis_code,
         grade_code=grade_code,

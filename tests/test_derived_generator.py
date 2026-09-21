@@ -152,14 +152,15 @@ def test_mixing_number_uses_mixing_date_and_supplier_000(session, staff_user, su
     assert m.receiving_date == D and m.supplier_code == "000"
 
 
-def test_mixing_rejects_mixed_jenis_but_legacy_03_equals_planifolia(session, staff_user, supplier):
+def test_mixing_may_blend_tahitensis_and_planifolia(session, staff_user, supplier):
+    """Fase 32b: Mixing boleh mencampur Jenis; AA hasil = pilihan staf."""
     a = _recv(session, staff_user, supplier, jenis="01")
     b = _recv(session, staff_user, supplier, jenis="02", grade="02")
-    with pytest.raises(ValueError):
-        _mix(session, staff_user, [a.batch_id, b.batch_id])
-    b.jenis_code = "03"  # legacy Planifolia
-    c = _recv(session, staff_user, supplier, jenis="02", grade="03")
-    _mix(session, staff_user, [b.batch_id, c.batch_id])
+    _mix(session, staff_user, [a.batch_id, b.batch_id], jenis_code="01")
+    assert "0101000-260921-03" in _numbers(session)
+    b.jenis_code = "03"  # sumber legacy juga tidak menghalangi
+    c = _recv(session, staff_user, supplier, jenis="01", grade="03")
+    _mix(session, staff_user, [b.batch_id, c.batch_id], jenis_code="02")
     assert "0201000-260921-03" in _numbers(session)
 
 
