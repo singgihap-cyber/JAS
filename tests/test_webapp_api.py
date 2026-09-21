@@ -2021,3 +2021,23 @@ def test_api_role_cancel_and_history(client, supplier_id, pic_id):
     hist = client.get(f"/api/supplier-returns/{eid}/history").json()
     assert [h["action"] for h in hist] == ["CONFIRMED", "CANCELLED"]
     assert client.get("/api/supplier-returns/9999/history").status_code == 404
+
+
+def test_api_bulk_confirm_supplier_returns(client, supplier_id, pic_id):
+    for day in ("2026-09-15", "2026-09-16"):
+        assert client.post("/api/receiving", json={
+            "event_date": day, "pic_user_id": pic_id, "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING", "net_quantity": "20.000", "off_spec_qty": "3.000"}).status_code == 201
+    ids = [r["event_id"] for r in client.get("/api/supplier-returns").json()]
+    pm = client.post("/api/users", json={"name": "Robiah", "role": "PRODUCTION_MANAGER"}).json()["user_id"]
+    url = "/api/supplier-returns/bulk-confirm-received"
+    body = {"event_ids": ids, "received_date": "2026-09-20", "actor_user_id": pm}
+    assert client.post(url, json={**body, "actor_user_id": pic_id}).status_code == 403
+    bad = client.post(url, json={**body, "event_ids": ids + [9999]})
+    assert bad.status_code == 422 and bad.json()["error"] == "bulk_return_confirm_error"
+    assert [f["event_id"] for f in bad.json()["failures"]] == [9999]
+    assert client.get("/api/supplier-returns?status=DITERIMA").json() == []  # tidak ada yang tersimpan
+    ok = client.post(url, json=body)
+    assert ok.status_code == 201 and len(ok.json()) == 2
+    assert client.get("/api/supplier-returns?status=DIKIRIM").json() == []
+    assert client.post(url, json=body).status_code == 422  # sudah diterima semua

@@ -910,9 +910,30 @@
                     </div>
                     <button type="submit" class="btn btn-secondary">Batalkan Konfirmasi</button>
                 </form>
+                <form id="supplierReturnBulkForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Konfirmasi massal (Production Manager)</label>
+                        <select class="form-select" id="srBulkPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:140px;margin-bottom:0">
+                        <label class="form-label">Tanggal diterima (sama untuk semua)</label>
+                        <input type="date" class="form-input" id="srBulkTanggal" required>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Catatan (opsional)</label>
+                        <input class="form-input" id="srBulkNote">
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="srBulkBtn" disabled>Konfirmasi Terpilih (0)</button>
+                </form>
+                <div class="info-box" style="margin-top:6px">
+                    Centang retur berstatus <b>Dikirim</b> di tabel di bawah, pilih Production Manager dan tanggal terima,
+                    lalu klik <b>Konfirmasi Terpilih</b>. Hanya Production Manager yang boleh massal. Bila satu retur
+                    bermasalah (mis. tanggal terima sebelum tanggal kirim), <b>tidak ada yang tersimpan</b> dan semua
+                    masalahnya ditampilkan.
+                </div>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>Event</th><th>Dikirim</th><th>Batch</th><th>Supplier</th><th>Qty</th><th>Asal</th><th>Status</th><th>Diterima / Catatan</th><th>Riwayat</th></tr></thead>
+                        <thead><tr><th><input type="checkbox" id="srSelectAll" title="Pilih semua retur yang masih Dikirim"></th><th>Event</th><th>Dikirim</th><th>Batch</th><th>Supplier</th><th>Qty</th><th>Asal</th><th>Status</th><th>Diterima / Catatan</th><th>Riwayat</th></tr></thead>
                         <tbody id="supplierReturnTable"></tbody>
                     </table>
                 </div>

@@ -813,6 +813,15 @@ class SupplierReturnConfirm(BaseModel):
     note: Optional[str] = None
 
 
+class SupplierReturnBulkConfirm(BaseModel):
+    """Fase 41 -- konfirmasi massal (hanya Production Manager, satu tanggal terima)."""
+
+    event_ids: list[int]
+    received_date: dt.date
+    actor_user_id: int
+    note: Optional[str] = None
+
+
 class SupplierReturnCancel(BaseModel):
     """Fase 40 -- batalkan konfirmasi 'diterima' (hanya Production Manager)."""
 

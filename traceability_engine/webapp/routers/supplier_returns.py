@@ -10,12 +10,12 @@ from sqlalchemy.orm import Session
 
 from ...models import ProcessEvent
 from ...services.supplier_return import (
-    cancel_return_confirmation, confirm_return_received, list_return_history,
+    bulk_confirm_returns, cancel_return_confirmation, confirm_return_received, list_return_history,
     list_supplier_returns, supplier_return_reminders,
 )
 from ..database import get_db
 from ..schemas import (
-    SupplierReturnCancel, SupplierReturnConfirm, SupplierReturnHistoryOut,
+    SupplierReturnBulkConfirm, SupplierReturnCancel, SupplierReturnConfirm, SupplierReturnHistoryOut,
     SupplierReturnReceiptOut, SupplierReturnRemindersOut,
     SupplierReturnRowOut,
 )
@@ -42,6 +42,21 @@ def get_supplier_return_reminders(db: Session = Depends(get_db)):
     """Pengingat (Fase 39): retur DIKIRIM >= 3 hari yang belum dikonfirmasi
     diterima supplier, tertua dulu. Hanya laporan, tidak memblokir."""
     return asdict(supplier_return_reminders(db))
+
+
+@router.post(
+    "/supplier-returns/bulk-confirm-received",
+    response_model=list[SupplierReturnReceiptOut],
+    status_code=201,
+)
+def bulk_confirm_supplier_returns(payload: SupplierReturnBulkConfirm, db: Session = Depends(get_db)):
+    """Fase 41: konfirmasi banyak retur sekaligus (Production Manager saja,
+    satu tanggal terima, semua-atau-tidak-sama-sekali)."""
+    receipts = bulk_confirm_returns(
+        db, event_ids=payload.event_ids, received_date=payload.received_date,
+        actor_user_id=payload.actor_user_id, note=payload.note)
+    db.flush()
+    return receipts
 
 
 @router.post(

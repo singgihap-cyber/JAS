@@ -116,7 +116,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -1654,6 +1654,7 @@ async function renderSupplierReturns() {
                 : `<span class="badge badge-primary">Dikirim${r.days_outstanding != null ? ' (' + r.days_outstanding + ' hari)' : ''}</span>`)
             : '<span class="badge badge-success">Diterima supplier</span>';
         return `<tr>
+            <td>${sent ? `<input type="checkbox" class="sr-pick" value="${r.event_id}">` : ''}</td>
             <td>#${r.event_id}</td>
             <td>${r.event_date}</td>
             <td class="batch-id">${r.batch_id ? '#' + r.batch_id + ' ' + (r.batch_number || '') : '–'}</td>
@@ -1663,8 +1664,12 @@ async function renderSupplierReturns() {
             <td>${badge}</td>
             <td>${r.received_date || '–'}${r.note ? ' — ' + r.note : ''}</td>
             <td><button type="button" class="btn btn-secondary btn-small" data-hist="${r.event_id}">Riwayat</button></td>
-        </tr><tr id="srHist${r.event_id}" style="display:none"><td colspan="9" class="sr-hist"></td></tr>`;
-    }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary)">Belum ada retur ke supplier</td></tr>';
+        </tr><tr id="srHist${r.event_id}" style="display:none"><td colspan="10" class="sr-hist"></td></tr>`;
+    }).join('') : '<tr><td colspan="10" style="text-align:center;color:var(--text-secondary)">Belum ada retur ke supplier</td></tr>';
+    const selectAll = document.getElementById('srSelectAll');
+    if (selectAll) selectAll.checked = false;
+    tbody.querySelectorAll('.sr-pick').forEach(cb => cb.addEventListener('change', updateBulkButton));
+    updateBulkButton();
     const open = rows.filter(r => r.status === 'DIKIRIM');
     const current = sel.value;
     sel.innerHTML = open.length
@@ -1700,6 +1705,43 @@ async function renderSupplierReturns() {
 }
 
 document.getElementById('srcTanggal').value = todayStr();
+
+// Fase 41: konfirmasi massal (centang di tabel; hanya Production Manager, satu tanggal, semua-atau-tidak-sama-sekali)
+function pickedReturnIds() {
+    return [...document.querySelectorAll('#supplierReturnTable .sr-pick:checked')].map(cb => Number(cb.value));
+}
+function updateBulkButton() {
+    const n = pickedReturnIds().length;
+    const btn = document.getElementById('srBulkBtn');
+    if (btn) { btn.textContent = `Konfirmasi Terpilih (${n})`; btn.disabled = n === 0; }
+}
+document.getElementById('srBulkTanggal').value = todayStr();
+document.getElementById('srSelectAll').addEventListener('change', (e) => {
+    document.querySelectorAll('#supplierReturnTable .sr-pick').forEach(cb => { cb.checked = e.target.checked; });
+    updateBulkButton();
+});
+document.getElementById('supplierReturnBulkForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ids = pickedReturnIds();
+    const picId = document.getElementById('srBulkPic').value;
+    if (!ids.length || !picId) { toast('Pilih retur (centang) dan Production Manager.', 'error'); return; }
+    try {
+        const r = await api('POST', '/supplier-returns/bulk-confirm-received', {
+            event_ids: ids,
+            received_date: document.getElementById('srBulkTanggal').value,
+            actor_user_id: Number(picId),
+            note: document.getElementById('srBulkNote').value.trim() || null,
+        });
+        toast(`✅ ${r.length} retur dikonfirmasi diterima supplier.`, 'success');
+        document.getElementById('srBulkNote').value = '';
+        await renderSupplierReturns();
+        renderSupplierReturnBanner();
+        await renderAuditLog();
+    } catch (err) {
+        // galat massal: pesan server memuat SEMUA retur bermasalah; tidak ada yang tersimpan
+        toastError(err, err.code === 'bulk_return_confirm_error' ? 15000 : 6000);
+    }
+});
 document.getElementById('supplierReturnConfirmForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const eventId = document.getElementById('srcEvent').value;

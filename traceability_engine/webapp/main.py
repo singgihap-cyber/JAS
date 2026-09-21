@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from ..exceptions import (
     EventDateOrderError,
     InsufficientStockError,
+    BulkReturnConfirmError,
     InvalidEventStructureError,
     QuantityReconciliationError,
     TraceabilityError,
@@ -76,6 +77,15 @@ async def _reconciliation_handler(request: Request, exc: QuantityReconciliationE
 @app.exception_handler(InvalidEventStructureError)
 async def _structure_handler(request: Request, exc: InvalidEventStructureError):
     return _error_response(422, "invalid_event_structure", exc)
+
+
+@app.exception_handler(BulkReturnConfirmError)
+async def _bulk_return_handler(request: Request, exc: BulkReturnConfirmError):
+    return JSONResponse(status_code=422, content={
+        "error": "bulk_return_confirm_error",
+        "detail": str(exc),
+        "failures": exc.failures,
+    })
 
 
 @app.exception_handler(InsufficientStockError)

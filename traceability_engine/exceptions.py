@@ -59,3 +59,16 @@ class EventDateOrderError(TraceabilityError):
 class UnauthorizedDispositionError(TraceabilityError):
     """Hanya User dengan role PRODUCTION_MANAGER yang boleh memutuskan
     disposisi batch REJECTED (Fase 26, dikonfirmasi user 2026-09-19)."""
+
+
+class BulkReturnConfirmError(TraceabilityError):
+    """Fase 41: konfirmasi massal retur supplier dibatalkan seluruhnya karena
+    satu atau lebih retur tidak valid (semua-atau-tidak-sama-sekali).
+    `failures` = daftar {event_id, reason}."""
+
+    def __init__(self, failures):
+        self.failures = failures
+        super().__init__(
+            f"Konfirmasi massal dibatalkan seluruhnya: {len(failures)} retur bermasalah, "
+            "tidak ada yang tersimpan. " + "; ".join(f"#{f['event_id']}: {f['reason']}" for f in failures)
+        )

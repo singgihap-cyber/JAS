@@ -42,6 +42,18 @@ tabel retur, dan `GET /api/supplier-returns/reminders`. HANYA tampilan: tidak
 memblokir apa pun, tidak ada tingkat kuning/merah, tidak ada kirim pesan keluar
 (server tidak punya kanal email/WhatsApp). Hari dihitung `as_of - event_date`;
 "terlambat" = hari >= 3 (retur dikirim 18/9 mulai diingatkan 21/9).
+
+**Fase 41 -- konfirmasi massal.** Keputusan user (2026-09-21): retur lama
+(Fase 26/29) dikonfirmasi lewat centang di tabel UI. (1) Hanya Production
+Manager yang boleh massal (selain itu 403 sebelum apa pun diperiksa); aturan
+"PIC Receiving per batch" tidak dipakai di jalur massal. (2) Satu tanggal
+diterima untuk semua retur terpilih. (3) Semua-atau-tidak-sama-sekali: bila
+satu retur tidak valid (sudah DITERIMA, bukan retur, VOID, tanggal terima <
+tanggal kirim) tidak ada yang tersimpan dan semua masalah dilaporkan sekaligus
+(`BulkReturnConfirmError`, HTTP 422). Tiap retur tetap mendapat receipt,
+baris riwayat CONFIRMED, dan AuditLog seperti konfirmasi tunggal; pembatalan
+tetap satu per satu (Fase 40). `[UNCONFIRMED]` id ganda dalam satu permintaan
+diabaikan (dedupe); daftar kosong ditolak.
 """
 from __future__ import annotations
 
@@ -56,7 +68,9 @@ from sqlalchemy.orm import Session
 
 from ..enums import AuditAction, EventStatus, EventType, LinkRole
 from ..enums import UserRole
-from ..exceptions import InvalidEventStructureError, UnauthorizedDispositionError
+from ..exceptions import (
+    BulkReturnConfirmError, InvalidEventStructureError, UnauthorizedDispositionError,
+)
 from ..models import (
     AuditLog, EventBatchLink, ProcessEvent, SupplierReturnHistory, SupplierReturnReceipt, User,
 )
@@ -160,6 +174,45 @@ def confirm_return_received(
     )
     session.flush()
     return receipt
+
+
+def bulk_confirm_returns(
+    session: Session,
+    *,
+    event_ids: list[int],
+    received_date: dt.date,
+    actor_user_id: int,
+    note: Optional[str] = None,
+) -> list[SupplierReturnReceipt]:
+    """Konfirmasi banyak retur sekaligus (Fase 41): hanya Production Manager,
+    satu tanggal terima, semua-atau-tidak-sama-sekali."""
+    actor = session.get(User, actor_user_id)
+    if actor is None:
+        raise InvalidEventStructureError(f"User {actor_user_id} tidak ditemukan.")
+    if actor.role != UserRole.PRODUCTION_MANAGER:
+        raise UnauthorizedDispositionError(
+            f"User {actor_user_id} tidak berwenang mengonfirmasi retur secara massal "
+            "-- hanya Production Manager (keputusan user 2026-09-21)."
+        )
+    ids = list(dict.fromkeys(event_ids))
+    if not ids:
+        raise InvalidEventStructureError("Pilih minimal satu retur untuk dikonfirmasi.")
+
+    failures: list[dict] = []
+    receipts: list[SupplierReturnReceipt] = []
+    savepoint = session.begin_nested()
+    for eid in ids:
+        try:
+            receipts.append(confirm_return_received(
+                session, event_id=eid, received_date=received_date,
+                actor_user_id=actor_user_id, note=note))
+        except InvalidEventStructureError as exc:
+            failures.append({"event_id": eid, "reason": str(exc)})
+    if failures:
+        savepoint.rollback()
+        raise BulkReturnConfirmError(failures)
+    savepoint.commit()
+    return receipts
 
 
 def cancel_return_confirmation(
