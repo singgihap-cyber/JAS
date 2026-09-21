@@ -119,6 +119,37 @@ def preview_batch_number(
     }
 
 
+@router.get("/batch-number/inherit-aa")
+def inherit_aa(
+    source_batch_id: int = Query(...),
+    typed_number: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Fase 33: AA yang diwariskan dari batch sumber untuk form Sortasi
+    (prefill) + peringatan bila `typed_number` ber-AA berbeda. `applies=False`
+    untuk sumber legacy 03/04 / AA tak terbaca (dibawa apa adanya)."""
+    from ...models import Batch
+    from ...services.batch_numbering import (
+        AA_INHERIT_GRADE_SLOTS, aa_inheritance_prefix, aa_inheritance_warning,
+        inherited_jenis,
+    )
+
+    source = db.get(Batch, source_batch_id)
+    if source is None:
+        return {"ok": False, "reason": "Batch sumber tidak ditemukan."}
+    inh = inherited_jenis(source)
+    return {
+        "ok": True,
+        "applies": inh is not None,
+        **(inh or {"jenis_code": source.jenis_code, "jenis_label": None}),
+        "prefixes": {
+            name: aa_inheritance_prefix(source, grade)
+            for name, grade in AA_INHERIT_GRADE_SLOTS
+        },
+        "warning": aa_inheritance_warning(source, typed_number),
+    }
+
+
 @router.get("/batch-number/preview-derived")
 def preview_derived_batch_number(
     process_code: str = Query(...),

@@ -36,6 +36,62 @@ from .events import NewBatchSpec, OutputSpec
 
 DERIVED_SOURCE_PROCESS_CODES = ("01", "02", "04")
 
+# Fase 33 -- pewarisan AA sepanjang rute (terutama Hijau). Keputusan user
+# (2026-09-21): AA hasil Sortasi PP 00 di-PREFILL dari batch sumber dan
+# perbedaan hanya diberi PERINGATAN (tidak diblokir); perubahan Jenis di
+# tengah rute dianggap salah input; sumber ber-AA legacy 03/04 dibiarkan
+# apa adanya (tanpa prefill, tanpa peringatan).
+AA_INHERIT_GRADE_SLOTS = (
+    ("gourmet", "01"), ("eg", "02"), ("ep", "03"), ("nc", "04"), ("powder", "05"),
+)
+
+
+def inherited_jenis(source: Batch) -> Optional[dict]:
+    """AA yang seharusnya diwariskan dari `source`, atau None bila tidak
+    berlaku (AA tak terbaca atau legacy 03/04 -- dibawa apa adanya)."""
+    code = source.jenis_code
+    if code not in bn.JENIS_CODES:
+        return None
+    return {"jenis_code": code, "jenis_label": bn.JENIS_CODES[code]}
+
+
+def aa_inheritance_prefix(source: Batch, grade_code: str) -> Optional[str]:
+    """Awalan [AA][BB][CCC]- untuk nomor hasil Sortasi (tanggal dan PP diisi
+    staf). None bila AA tidak diwariskan atau supplier sumber tak diketahui."""
+    inh = inherited_jenis(source)
+    if inh is None or not source.supplier_code:
+        return None
+    return f"{inh['jenis_code']}{grade_code}{source.supplier_code.zfill(3)}-"
+
+
+def aa_inheritance_warning(source: Batch, typed_number: Optional[str]) -> Optional[str]:
+    """Peringatan bila AA nomor ketikan staf berbeda dari AA batch sumber.
+    Tidak pernah memblokir; nomor tak terurai / sumber legacy -> None."""
+    inh = inherited_jenis(source)
+    if inh is None or not typed_number or not typed_number.strip():
+        return None
+    try:
+        parsed = bn.parse(typed_number.strip())
+    except ValueError:
+        return None
+    if parsed.jenis_code == inh["jenis_code"]:
+        return None
+    return (
+        f"Nomor {typed_number.strip()}: AA {parsed.jenis_code} berbeda dari batch sumber "
+        f"#{source.batch_id} (AA {inh['jenis_code']} = {inh['jenis_label']}). "
+        f"Jenis seharusnya tidak berubah sepanjang rute; periksa kemungkinan salah input."
+    )
+
+
+def sortation_aa_warnings(source: Batch, data) -> list[str]:
+    """Peringatan pewarisan AA untuk semua nomor batch ketikan di SortationInput."""
+    out: list[str] = []
+    for name, _grade in AA_INHERIT_GRADE_SLOTS:
+        w = aa_inheritance_warning(source, getattr(data, f"{name}_batch_number", None))
+        if w:
+            out.append(w)
+    return out
+
 
 def derive_number(
     source: Batch, *, grade_code: str, process_code: str, jenis_code: Optional[str] = None

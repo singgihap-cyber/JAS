@@ -1819,3 +1819,37 @@ def test_derived_batch_number_api_fase32(client, supplier_id, pic_id):
     assert client.post("/api/sortation", json={
         "event_date": "2026-09-21", "pic_user_id": pic_id, "batch_id": b, "initial_qty": 1,
         "eg_qty": 1, "process_code": "00", "auto_batch_number": True}).status_code == 422
+
+
+def test_aa_inheritance_api_fase33(client, supplier_id, pic_id):
+    """Fase 33: inherit-aa (prefill) + peringatan di respons Sortasi PP 00."""
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_HIJAU", "net_quantity": 100, "jenis_code": "02", "grade_code": "00"})
+    assert r.status_code == 201, r.text
+    src = r.json()["batch"]["batch_id"]
+
+    ia = client.get("/api/batch-number/inherit-aa", params={
+        "source_batch_id": src, "typed_number": "0102024-260918-00"}).json()
+    assert ia["ok"] and ia["applies"] and ia["jenis_code"] == "02"
+    assert ia["jenis_label"] == "Planifolia"
+    assert ia["prefixes"]["eg"] == "0202024-" and "AA 01" in ia["warning"]
+    assert client.get("/api/batch-number/inherit-aa", params={"source_batch_id": src}).json()["warning"] is None
+    assert client.get("/api/batch-number/inherit-aa", params={"source_batch_id": 9999}).json()["ok"] is False
+
+    ok = client.post("/api/sortation", json={
+        "event_date": "2026-09-18", "pic_user_id": pic_id, "batch_id": src, "initial_qty": 100,
+        "eg_qty": 60, "process_code": "00", "eg_batch_number": "0202024-260918-00"})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["warnings"] == []
+
+    r2 = client.post("/api/receiving", json={
+        "event_date": "2026-09-02", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_HIJAU", "net_quantity": 50, "jenis_code": "02", "grade_code": "00"})
+    src2 = r2.json()["batch"]["batch_id"]
+    bad = client.post("/api/sortation", json={
+        "event_date": "2026-09-19", "pic_user_id": pic_id, "batch_id": src2, "initial_qty": 50,
+        "eg_qty": 40, "process_code": "00", "eg_batch_number": "0102024-260919-00"})
+    assert bad.status_code == 201, bad.text  # peringatan, bukan blokir
+    assert len(bad.json()["warnings"]) == 1
+    assert bad.json()["batches"][0]["batch_number"] == "0102024-260919-00"

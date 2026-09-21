@@ -13,6 +13,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ...enums import LinkRole
+from ...models import Batch
+from ...services.batch_numbering import sortation_aa_warnings
 from ...services.sortation import SortationInput, record_sortation
 from ..database import get_db
 from ..schemas import SortationCreate, SortationResult
@@ -50,7 +52,10 @@ def create_sortation(payload: SortationCreate, db: Session = Depends(get_db)):
     # SORTATION is ONE->MANY: every OUTPUT link is a newly minted grade batch
     # (never a self-loop reuse of the input, services/sortation.py #1).
     new_batches = [link.batch for link in event.links if link.role == LinkRole.OUTPUT]
+    # Fase 33 -- peringatan (bukan blokir) bila AA nomor ketikan != AA sumber.
+    source = db.get(Batch, payload.batch_id)
     return SortationResult(
         event=event_to_out(db, event),
         batches=[batch_to_out(b) for b in new_batches],
+        warnings=sortation_aa_warnings(source, data) if source else [],
     )

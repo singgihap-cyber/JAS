@@ -655,9 +655,11 @@ function renderProsesFields() {
                     placeholder="${f.placeholder || ''}"${f.required ? ' required' : ''}>`;
             }
             return `<div class="form-group"><label class="form-label">${f.label}${req}</label>${input}</div>`;
-        }).join('') + (def.derivedPreview ? '<div class="info-box" id="pDerivedPreview">&nbsp;</div>' : '');
+        }).join('') + (def.derivedPreview ? '<div class="info-box" id="pDerivedPreview">&nbsp;</div>' : '')
+        + (def.key === 'sortation' ? '<div class="info-box" id="pAaInfo">&nbsp;</div>' : '');
     renderProsesHistory();
     refreshDerivedPreview();
+    refreshAaInheritance();
 }
 
 // Fase 32: pratinjau nomor batch turunan (Sortasi PP 01/02, Rework PP 04)
@@ -693,6 +695,56 @@ function refreshDerivedPreview() {
         box.innerHTML = lines.join('<br>');
     }, 300);
 }
+// Fase 33: pewarisan AA (Sortasi) -- awalan nomor dari batch sumber + peringatan
+// bila AA ketikan staf berbeda. Hanya peringatan; tidak memblokir penyimpanan.
+const SORT_NUMBER_FIELDS = [['gourmet', 'pf_gourmet_batch_number'], ['eg', 'pf_eg_batch_number'], ['ep', 'pf_ep_batch_number'], ['nc', 'pf_nc_batch_number'], ['powder', 'pf_powder_batch_number']];
+let aaInfo = null, aaInfoBatchId = null, aaTimer = null;
+async function loadAaInfo(batchId) {
+    if (!batchId) { aaInfo = null; aaInfoBatchId = null; return null; }
+    if (aaInfoBatchId === batchId && aaInfo) return aaInfo;
+    try { aaInfo = await api('GET', '/batch-number/inherit-aa?source_batch_id=' + encodeURIComponent(batchId)); }
+    catch (err) { aaInfo = null; }
+    aaInfoBatchId = batchId;
+    return aaInfo;
+}
+function refreshAaInheritance() {
+    clearTimeout(aaTimer);
+    const box = document.getElementById('pAaInfo');
+    if (!box) return;
+    const batchId = document.getElementById('pBatch').value;
+    aaTimer = setTimeout(async () => {
+        const info = await loadAaInfo(batchId);
+        if (!batchId || !info || !info.ok) { box.textContent = ' '; return; }
+        if (!info.applies) {
+            box.textContent = 'AA batch sumber (' + (info.jenis_code || '?') + ') adalah kode lama/tak dikenal — dibawa apa adanya, tanpa awalan otomatis.';
+            return;
+        }
+        const lines = ['AA diwariskan dari batch sumber: <b>' + info.jenis_code + ' — ' + info.jenis_label + '</b>. Klik kolom No. Batch kosong untuk mengisi awalan (lanjutkan dengan tanggal-PP).'];
+        for (const [name, id] of SORT_NUMBER_FIELDS) {
+            const el = document.getElementById(id);
+            const v = el ? el.value.trim() : '';
+            if (!v) continue;
+            const m = /^(\d{2})\d{4,5}-\d{6}-\d{2}$/.exec(v);
+            if (m && m[1] !== info.jenis_code) lines.push('⚠️ ' + v + ': AA ' + m[1] + ' berbeda dari sumber (' + info.jenis_code + '). Jenis seharusnya tidak berubah — periksa salah input. Tetap bisa disimpan.');
+        }
+        box.innerHTML = lines.join('<br>');
+    }, 250);
+}
+document.getElementById('prosesFields').addEventListener('focusin', async (e) => {
+    const hit = SORT_NUMBER_FIELDS.find(([, id]) => id === e.target.id);
+    if (!hit || e.target.value) return;
+    const info = await loadAaInfo(document.getElementById('pBatch').value);
+    const prefix = info && info.ok && info.applies ? info.prefixes[hit[0]] : null;
+    if (prefix && !e.target.value) e.target.value = prefix;
+});
+document.getElementById('prosesFields').addEventListener('focusout', (e) => {
+    // awalan saja (belum dilanjutkan tanggal-PP) dikosongkan agar tidak tersimpan setengah jadi
+    if (SORT_NUMBER_FIELDS.some(([, id]) => id === e.target.id) && /^\d{7}-$/.test(e.target.value)) {
+        e.target.value = '';
+        refreshAaInheritance();
+    }
+});
+document.getElementById('prosesFields').addEventListener('input', refreshAaInheritance);
 document.getElementById('prosesFields').addEventListener('input', refreshDerivedPreview);
 document.getElementById('prosesFields').addEventListener('change', refreshDerivedPreview);
 
@@ -770,6 +822,9 @@ document.getElementById('prosesForm').addEventListener('submit', async (e) => {
             extra = ` → batch baru #${result.batch.batch_id}`;
         }
         toast(`✅ ${def.label} untuk batch #${batchId} tersimpan.${extra}`, 'success');
+        if (result && Array.isArray(result.warnings) && result.warnings.length) {
+            toast('⚠️ ' + result.warnings.join(' | '), 'info', 12000);
+        }
         document.getElementById('prosesForm').reset();
         renderProsesFields();
         await refreshBatches();

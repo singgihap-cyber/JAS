@@ -366,6 +366,7 @@ class SortationCreate(BaseModel):
 class SortationResult(BaseModel):
     event: ProcessEventOut
     batches: list[BatchOut]  # one per grade quantity > 0 supplied -- ONE->MANY, sortation.py #1
+    warnings: list[str] = []  # Fase 33 -- peringatan pewarisan AA (tidak memblokir)
 
 
 # ---------------------------------------------------------------------- mixing
