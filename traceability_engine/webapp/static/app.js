@@ -116,7 +116,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -138,7 +138,7 @@ function renderCustomersTable() {
                 <div class="customer-suggest" style="margin:0 0 6px 0">${aliasBadges}</div>
                 <div style="display:flex;gap:4px">
                     <input class="form-input" style="padding:4px 8px;font-size:12px" placeholder="Tambah alias — mis. MALIK S/RUSIA" data-alias-input="${c.customer_id}">
-                    <button type="button" class="btn btn-secondary btn-small" data-alias-add="${c.customer_id}">+ Alias</button>
+                    <button type="button" class="btn btn-secondary btn-smallall" data-alias-add="${c.customer_id}">+ Alias</button>
                 </div>
             </td>
         </tr>`;
@@ -899,7 +899,7 @@ function mixSourceRowHtml(rowId) {
                 <label class="form-label">Qty (kg)</label>
                 <input type="number" class="form-input mix-src-qty" id="mixSrcQty${rowId}" step="0.001" min="0">
             </div>
-            <button type="button" class="btn btn-secondary btn-small mix-src-remove">✕</button>
+            <button type="button" class="btn btn-secondary btn-smallall mix-src-remove">✕</button>
         </div>
     </div>`;
 }
@@ -1059,7 +1059,7 @@ function vacLineRowHtml(rowId) {
                 <label class="form-label">Berat Total (kg) <span style="color:var(--danger)">*</span></label>
                 <input type="number" class="form-input vac-line-total" id="vacLineTotal${rowId}" step="0.001" min="0" required>
             </div>
-            <button type="button" class="btn btn-secondary btn-small vac-line-remove">✕</button>
+            <button type="button" class="btn btn-secondary btn-smallall vac-line-remove">✕</button>
         </div>
     </div>`;
 }
@@ -1158,7 +1158,7 @@ function pkSourceRowHtml(rowId) {
                 <label class="form-label">Berat (kg)</label>
                 <input type="number" class="form-input pk-src-qty" id="pkSrcQty${rowId}" step="0.001" min="0">
             </div>
-            <button type="button" class="btn btn-secondary btn-small pk-src-remove">✕</button>
+            <button type="button" class="btn btn-secondary btn-smallall pk-src-remove">✕</button>
         </div>
     </div>`;
 }
@@ -1290,7 +1290,7 @@ function deliverySourceRowHtml(prefix, rowId) {
                 <label class="form-label">Netto (kg)</label>
                 <input type="number" class="form-input ${prefix}-src-qty" id="${prefix}SrcQty${rowId}" step="0.001" min="0">
             </div>
-            <button type="button" class="btn btn-secondary btn-small ${prefix}-src-remove">✕</button>
+            <button type="button" class="btn btn-secondary btn-smallall ${prefix}-src-remove">✕</button>
         </div>
     </div>`;
 }
@@ -1633,8 +1633,8 @@ document.getElementById('returnForm').addEventListener('submit', async (e) => {
 });
 
 // ─── STATUS RETUR KE SUPPLIER: DIKIRIM -> DITERIMA (Fase 38) ────────────
-// Tanpa batasan role untuk konfirmasi (services/supplier_return.py); server
-// menolak tanggal terima < tanggal kirim dan konfirmasi ganda.
+// Fase 40: konfirmasi hanya Production Manager / PIC Receiving batch itu, pembatalan hanya
+// Production Manager (ditegakkan server, 403). Server juga menolak tanggal terima < tanggal kirim.
 const SUPPLIER_RETURN_SOURCE = { RECEIVING_OFF_SPEC: 'Off-spec Receiving', REJECTED_BATCH: 'Batch REJECTED' };
 
 async function renderSupplierReturns() {
@@ -1662,8 +1662,9 @@ async function renderSupplierReturns() {
             <td>${SUPPLIER_RETURN_SOURCE[r.source] || r.source}</td>
             <td>${badge}</td>
             <td>${r.received_date || '–'}${r.note ? ' — ' + r.note : ''}</td>
-        </tr>`;
-    }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada retur ke supplier</td></tr>';
+            <td><button type="button" class="btn btn-secondary btn-small" data-hist="${r.event_id}">Riwayat</button></td>
+        </tr><tr id="srHist${r.event_id}" style="display:none"><td colspan="9" class="sr-hist"></td></tr>`;
+    }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary)">Belum ada retur ke supplier</td></tr>';
     const open = rows.filter(r => r.status === 'DIKIRIM');
     const current = sel.value;
     sel.innerHTML = open.length
@@ -1671,6 +1672,31 @@ async function renderSupplierReturns() {
             `<option value="${r.event_id}">#${r.event_id} — ${r.supplier_name || '?'} · ${fmtQty(r.quantity)} ${r.unit} · dikirim ${r.event_date}</option>`).join('')
         : '<option value="">Tidak ada retur yang menunggu konfirmasi</option>';
     if (current && open.some(r => String(r.event_id) === current)) sel.value = current;
+    const cancelSel = document.getElementById('srcCancelEvent');
+    if (cancelSel) {
+        const done = rows.filter(r => r.status === 'DITERIMA');
+        const cur = cancelSel.value;
+        cancelSel.innerHTML = done.length
+            ? '<option value="">Pilih retur...</option>' + done.map(r =>
+                `<option value="${r.event_id}">#${r.event_id} — ${r.supplier_name || '?'} · ${fmtQty(r.quantity)} ${r.unit} · diterima ${r.received_date}</option>`).join('')
+            : '<option value="">Tidak ada konfirmasi yang bisa dibatalkan</option>';
+        if (cur && done.some(r => String(r.event_id) === cur)) cancelSel.value = cur;
+    }
+    tbody.querySelectorAll('button[data-hist]').forEach(btn => btn.addEventListener('click', async () => {
+        const id = btn.dataset.hist;
+        const row = document.getElementById('srHist' + id);
+        if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+        try {
+            const h = await api('GET', `/supplier-returns/${id}/history`);
+            const label = { CONFIRMED: 'Dikonfirmasi diterima', CANCELLED: 'Konfirmasi dibatalkan' };
+            row.firstElementChild.textContent = h.length
+                ? h.map(x => `${(x.occurred_at || '').replace('T', ' ').slice(0, 16)} — ${label[x.action] || x.action}` +
+                    `${x.received_date ? ' (tgl terima ' + x.received_date + ')' : ''} oleh ${picName(x.actor_user_id)}` +
+                    `${x.note ? ' — ' + x.note : ''}`).join('  |  ')
+                : 'Belum ada riwayat konfirmasi.';
+            row.style.display = '';
+        } catch (err) { toastError(err, 6000); }
+    }));
 }
 
 document.getElementById('srcTanggal').value = todayStr();
@@ -1688,6 +1714,24 @@ document.getElementById('supplierReturnConfirmForm').addEventListener('submit', 
         toast(`✅ Retur #${eventId} dikonfirmasi diterima supplier.`, 'success');
         document.getElementById('supplierReturnConfirmForm').reset();
         document.getElementById('srcTanggal').value = todayStr();
+        await renderSupplierReturns();
+        renderSupplierReturnBanner();
+        await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
+
+document.getElementById('supplierReturnCancelForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventId = document.getElementById('srcCancelEvent').value;
+    const picId = document.getElementById('srcCancelPic').value;
+    if (!eventId || !picId) { toast('Retur dan pembatal harus dipilih.', 'error'); return; }
+    try {
+        await api('POST', `/supplier-returns/${eventId}/cancel-confirmation`, {
+            actor_user_id: Number(picId),
+            reason: document.getElementById('srcCancelReason').value.trim(),
+        });
+        toast(`↩️ Konfirmasi retur #${eventId} dibatalkan; status kembali Dikirim.`, 'success');
+        document.getElementById('supplierReturnCancelForm').reset();
         await renderSupplierReturns();
         renderSupplierReturnBanner();
         await renderAuditLog();

@@ -288,3 +288,23 @@ class SupplierReturnReceipt(Base):
     confirmed_by: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     confirmed_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class SupplierReturnHistory(Base):
+    """Fase 40 -- riwayat konfirmasi/pembatalan status retur supplier.
+
+    Status SAAT INI tetap = ada/tidaknya baris `supplier_return_receipts`
+    (Fase 38). Membatalkan konfirmasi menghapus baris receipt itu, tetapi
+    seluruh kejadian (CONFIRMED / CANCELLED) tetap tersimpan di sini sebagai
+    jejak. Tabel baru -> `create_all` cukup untuk DB produksi (tanpa ALTER).
+    """
+
+    __tablename__ = "supplier_return_history"
+
+    history_id: Mapped[int] = mapped_column(primary_key=True)
+    return_event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
+    action: Mapped[str] = mapped_column(String(12))  # CONFIRMED | CANCELLED
+    received_date: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    occurred_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # catatan konfirmasi / alasan batal

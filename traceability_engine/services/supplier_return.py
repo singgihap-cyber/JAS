@@ -11,15 +11,29 @@ punya DUA status.
 
 Keputusan yang diambil di sini (CLAUDE.md rule 11) -- `[UNCONFIRMED]`:
 
-- Siapa yang boleh mengonfirmasi TIDAK dibatasi role (user tidak menyebut
-  pembatasan; opsi "hanya Production Manager" tidak dipilih). Setiap
-  konfirmasi menulis AuditLog (siapa, kapan, tanggal terima).
+- (Fase 38, DIGANTI Fase 40: kini dibatasi Production Manager / PIC Receiving.)
+  Setiap konfirmasi menulis AuditLog (siapa, kapan, tanggal terima).
 - Tanggal terima tidak boleh lebih awal dari tanggal event pengembalian.
-- Konfirmasi tidak bisa diulang atau dibatalkan (satu per event); salah
-  konfirmasi = perlu keputusan terpisah, sengaja belum ada fitur batal.
+- Satu konfirmasi aktif per event (Fase 38); pembatalan ditambahkan Fase 40.
 - Konfirmasi tidak mengubah stok atau status batch; hanya status retur.
 - Event yang sudah VOID tidak bisa dikonfirmasi dan tidak dilaporkan.
 - Laporan bersifat read-only.
+
+**Fase 40 -- role, pembatalan, riwayat.** Keputusan user (2026-09-21) menutup
+pertanyaan terbuka Fase 38/39:
+1. Konfirmasi "diterima" HANYA boleh oleh Production Manager ATAU "PIC
+   Receiving" = user yang mencatat event RECEIVING batch retur itu
+   (`ProcessEvent.pic_user_id`; user memilih ini, bukan role baru). Lainnya
+   -> `UnauthorizedDispositionError` (HTTP 403).
+   `[UNCONFIRMED]` retur dari batch turunan tanpa event RECEIVING (mis. hasil
+   sortasi) tidak punya PIC Receiving -> hanya Production Manager.
+2. Konfirmasi BISA dibatalkan, HANYA oleh Production Manager, alasan wajib;
+   status kembali DIKIRIM dan pengingat dihitung lagi dari tanggal kirim.
+3. Riwayat disimpan (`SupplierReturnHistory`: CONFIRMED/CANCELLED). Status
+   saat ini tetap = ada/tidaknya `SupplierReturnReceipt`; pembatalan menghapus
+   baris receipt itu, sehingga konfirmasi ulang bisa dilakukan (UNIQUE aman).
+   Konfirmasi Fase 38 yang belum punya riwayat di-snapshot ke riwayat saat
+   dibatalkan. AuditLog juga mencatat pembatalan.
 
 **Fase 39 -- pengingat.** Keputusan user (2026-09-21): retur berstatus DIKIRIM
 diingatkan mulai `REMINDER_AFTER_DAYS` = 3 hari sejak tanggal kirim dan terus
@@ -41,12 +55,48 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..enums import AuditAction, EventStatus, EventType, LinkRole
-from ..exceptions import InvalidEventStructureError
-from ..models import AuditLog, EventBatchLink, ProcessEvent, SupplierReturnReceipt, User
+from ..enums import UserRole
+from ..exceptions import InvalidEventStructureError, UnauthorizedDispositionError
+from ..models import (
+    AuditLog, EventBatchLink, ProcessEvent, SupplierReturnHistory, SupplierReturnReceipt, User,
+)
 
 STATUS_SENT = "DIKIRIM"
 STATUS_RECEIVED = "DITERIMA"
 REMINDER_AFTER_DAYS = 3  # Fase 39 -- keputusan user 2026-09-21
+
+
+def _return_batch_id(session: Session, event_id: int) -> Optional[int]:
+    link = session.execute(
+        select(EventBatchLink).where(
+            EventBatchLink.event_id == event_id, EventBatchLink.role == LinkRole.INPUT
+        )
+    ).scalars().first()
+    return link.batch_id if link is not None else None
+
+
+def can_confirm_return(session: Session, *, event_id: int, user_id: int) -> bool:
+    """Production Manager, atau user yang mencatat RECEIVING batch retur itu."""
+    user = session.get(User, user_id)
+    if user is None:
+        return False
+    if user.role == UserRole.PRODUCTION_MANAGER:
+        return True
+    batch_id = _return_batch_id(session, event_id)
+    if batch_id is None:
+        return False
+    recorder = session.execute(
+        select(ProcessEvent.event_id)
+        .join(EventBatchLink, EventBatchLink.event_id == ProcessEvent.event_id)
+        .where(
+            EventBatchLink.batch_id == batch_id,
+            EventBatchLink.role == LinkRole.OUTPUT,
+            ProcessEvent.event_type == EventType.RECEIVING,
+            ProcessEvent.status == EventStatus.COMPLETED,
+            ProcessEvent.pic_user_id == user_id,
+        )
+    ).first()
+    return recorder is not None
 
 
 def confirm_return_received(
@@ -67,6 +117,12 @@ def confirm_return_received(
         raise InvalidEventStructureError(f"Event {event_id} berstatus {event.status.value}.")
     if session.get(User, actor_user_id) is None:
         raise InvalidEventStructureError(f"User {actor_user_id} tidak ditemukan.")
+    if not can_confirm_return(session, event_id=event_id, user_id=actor_user_id):
+        raise UnauthorizedDispositionError(
+            f"User {actor_user_id} tidak berwenang mengonfirmasi retur diterima supplier "
+            "-- hanya Production Manager atau PIC yang mencatat Receiving batch retur ini "
+            "(keputusan user 2026-09-21)."
+        )
     if received_date < event.event_date:
         raise InvalidEventStructureError(
             f"Tanggal diterima supplier ({received_date}) tidak boleh lebih awal dari "
@@ -88,6 +144,10 @@ def confirm_return_received(
         note=note.strip() if note and note.strip() else None,
     )
     session.add(receipt)
+    session.add(SupplierReturnHistory(
+        return_event_id=event_id, action="CONFIRMED", received_date=received_date,
+        actor_user_id=actor_user_id, note=receipt.note,
+    ))
     session.add(
         AuditLog(
             entity_type="ProcessEvent",
@@ -100,6 +160,68 @@ def confirm_return_received(
     )
     session.flush()
     return receipt
+
+
+def cancel_return_confirmation(
+    session: Session, *, event_id: int, actor_user_id: int, reason: str
+) -> SupplierReturnHistory:
+    """Batalkan konfirmasi "diterima" (Fase 40): status kembali DIKIRIM.
+
+    Hanya Production Manager; alasan wajib; hanya bila status saat ini DITERIMA.
+    Riwayat dipertahankan (CONFIRMED lama + CANCELLED baru)."""
+    if not reason or not reason.strip():
+        raise InvalidEventStructureError("Pembatalan konfirmasi retur wajib mencantumkan alasan.")
+    actor = session.get(User, actor_user_id)
+    if actor is None or actor.role != UserRole.PRODUCTION_MANAGER:
+        raise UnauthorizedDispositionError(
+            f"User {actor_user_id} tidak berwenang membatalkan konfirmasi retur "
+            "-- hanya Production Manager (keputusan user 2026-09-21)."
+        )
+    receipt = session.execute(
+        select(SupplierReturnReceipt).where(SupplierReturnReceipt.return_event_id == event_id)
+    ).scalars().first()
+    if receipt is None:
+        raise InvalidEventStructureError(
+            f"Retur event {event_id} tidak berstatus {STATUS_RECEIVED}; tidak ada konfirmasi untuk dibatalkan."
+        )
+    # Konfirmasi Fase 38 belum punya riwayat: snapshot dulu agar jejak utuh.
+    has_confirm = session.execute(
+        select(SupplierReturnHistory.history_id).where(
+            SupplierReturnHistory.return_event_id == event_id,
+            SupplierReturnHistory.action == "CONFIRMED",
+            SupplierReturnHistory.actor_user_id == receipt.confirmed_by,
+            SupplierReturnHistory.received_date == receipt.received_date,
+        )
+    ).first()
+    if has_confirm is None:
+        session.add(SupplierReturnHistory(
+            return_event_id=event_id, action="CONFIRMED", received_date=receipt.received_date,
+            actor_user_id=receipt.confirmed_by, note=receipt.note,
+            occurred_at=receipt.confirmed_at,
+        ))
+    entry = SupplierReturnHistory(
+        return_event_id=event_id, action="CANCELLED", received_date=receipt.received_date,
+        actor_user_id=actor_user_id, note=reason.strip(),
+    )
+    session.add(entry)
+    session.add(AuditLog(
+        entity_type="ProcessEvent", entity_id=event_id, action=AuditAction.UPDATE,
+        actor_user_id=actor_user_id,
+        before_value=f"SUPPLIER_RETURN {STATUS_RECEIVED}: {receipt.received_date.isoformat()}",
+        after_value=f"SUPPLIER_RETURN {STATUS_SENT} (konfirmasi dibatalkan: {reason.strip()})",
+    ))
+    session.delete(receipt)
+    session.flush()
+    return entry
+
+
+def list_return_history(session: Session, *, event_id: int) -> list[SupplierReturnHistory]:
+    """Riwayat konfirmasi/pembatalan satu retur, terlama dulu."""
+    return list(session.execute(
+        select(SupplierReturnHistory)
+        .where(SupplierReturnHistory.return_event_id == event_id)
+        .order_by(SupplierReturnHistory.history_id)
+    ).scalars())
 
 
 @dataclass

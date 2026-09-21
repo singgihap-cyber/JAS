@@ -1993,3 +1993,31 @@ def test_api_supplier_return_reminders(client, supplier_id, pic_id):
     assert rem["count"] == 0 and rem["oldest_days"] is None
     assert client.get("/api/supplier-returns?overdue=true").json() == []
 
+
+# ---- Fase 40 (role konfirmasi retur, pembatalan, riwayat) ----
+
+def test_api_role_cancel_and_history(client, supplier_id, pic_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-17", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000", "off_spec_qty": "3.000"})
+    assert r.status_code == 201, r.text
+    eid = client.get("/api/supplier-returns").json()[0]["event_id"]
+    outsider = client.post("/api/users", json={"name": "Orang Lain", "role": "STAFF"}).json()["user_id"]
+    pm = client.post("/api/users", json={"name": "Robiah", "role": "PRODUCTION_MANAGER"}).json()["user_id"]
+    body = {"received_date": "2026-09-20", "actor_user_id": outsider}
+    assert client.post(f"/api/supplier-returns/{eid}/confirm-received", json=body).status_code == 403
+    assert client.post(f"/api/supplier-returns/{eid}/confirm-received",
+                       json={**body, "actor_user_id": pic_id}).status_code == 201
+    assert client.post(f"/api/supplier-returns/{eid}/cancel-confirmation",
+                       json={"actor_user_id": pic_id, "reason": "salah"}).status_code == 403
+    assert client.post(f"/api/supplier-returns/{eid}/cancel-confirmation",
+                       json={"actor_user_id": pm, "reason": ""}).status_code == 422
+    assert client.post("/api/supplier-returns/9999/cancel-confirmation",
+                       json={"actor_user_id": pm, "reason": "x"}).status_code == 404
+    ok = client.post(f"/api/supplier-returns/{eid}/cancel-confirmation",
+                     json={"actor_user_id": pm, "reason": "salah konfirmasi"})
+    assert ok.status_code == 201 and ok.json()["action"] == "CANCELLED"
+    assert client.get("/api/supplier-returns").json()[0]["status"] == "DIKIRIM"
+    hist = client.get(f"/api/supplier-returns/{eid}/history").json()
+    assert [h["action"] for h in hist] == ["CONFIRMED", "CANCELLED"]
+    assert client.get("/api/supplier-returns/9999/history").status_code == 404

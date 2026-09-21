@@ -809,8 +809,27 @@ class DispositionRowOut(BaseModel):
 # ------------------------------------------- status retur supplier (Fase 38)
 class SupplierReturnConfirm(BaseModel):
     received_date: dt.date  # tanggal supplier menerima barang retur
-    actor_user_id: int  # siapa yang mengonfirmasi (tanpa batasan role, services/supplier_return.py)
+    actor_user_id: int  # Production Manager atau PIC Receiving batch itu (Fase 40; selain itu 403)
     note: Optional[str] = None
+
+
+class SupplierReturnCancel(BaseModel):
+    """Fase 40 -- batalkan konfirmasi 'diterima' (hanya Production Manager)."""
+
+    actor_user_id: int
+    reason: str
+
+
+class SupplierReturnHistoryOut(BaseModel):
+    history_id: int
+    return_event_id: int
+    action: str  # CONFIRMED | CANCELLED
+    received_date: Optional[dt.date] = None
+    actor_user_id: int
+    occurred_at: Optional[dt.datetime] = None
+    note: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
 class SupplierReturnReceiptOut(BaseModel):

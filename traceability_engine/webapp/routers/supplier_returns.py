@@ -10,11 +10,13 @@ from sqlalchemy.orm import Session
 
 from ...models import ProcessEvent
 from ...services.supplier_return import (
-    confirm_return_received, list_supplier_returns, supplier_return_reminders,
+    cancel_return_confirmation, confirm_return_received, list_return_history,
+    list_supplier_returns, supplier_return_reminders,
 )
 from ..database import get_db
 from ..schemas import (
-    SupplierReturnConfirm, SupplierReturnReceiptOut, SupplierReturnRemindersOut,
+    SupplierReturnCancel, SupplierReturnConfirm, SupplierReturnHistoryOut,
+    SupplierReturnReceiptOut, SupplierReturnRemindersOut,
     SupplierReturnRowOut,
 )
 
@@ -61,3 +63,27 @@ def confirm_supplier_return_received(
     )
     db.flush()
     return receipt
+
+
+@router.post(
+    "/supplier-returns/{event_id}/cancel-confirmation",
+    response_model=SupplierReturnHistoryOut,
+    status_code=201,
+)
+def cancel_supplier_return_confirmation(
+    event_id: int, payload: SupplierReturnCancel, db: Session = Depends(get_db)
+):
+    """Fase 40: batalkan konfirmasi diterima (hanya Production Manager, alasan wajib)."""
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    entry = cancel_return_confirmation(
+        db, event_id=event_id, actor_user_id=payload.actor_user_id, reason=payload.reason)
+    db.flush()
+    return entry
+
+
+@router.get("/supplier-returns/{event_id}/history", response_model=list[SupplierReturnHistoryOut])
+def get_supplier_return_history(event_id: int, db: Session = Depends(get_db)):
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    return list_return_history(db, event_id=event_id)

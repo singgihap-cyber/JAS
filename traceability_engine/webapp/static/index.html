@@ -869,8 +869,10 @@
                 <div class="info-box">
                     Setiap pengembalian ke supplier (off-spec saat Receiving maupun batch REJECTED) berstatus
                     <b>Dikirim</b> sejak dicatat. Setelah supplier menerima barangnya, konfirmasikan di sini dengan
-                    tanggal terima (tidak boleh sebelum tanggal kirim, satu konfirmasi per retur). Konfirmasi
-                    tidak mengubah stok dan tidak dibatasi role; tercatat di Audit Log. Retur yang sudah <b>3 hari</b> atau lebih
+                    tanggal terima (tidak boleh sebelum tanggal kirim, satu konfirmasi aktif per retur). Konfirmasi
+                    hanya boleh oleh <b>Production Manager</b> atau <b>PIC yang mencatat Receiving</b> batch retur itu
+                    (selain itu ditolak). Konfirmasi tidak mengubah stok; tercatat di Audit Log. Salah konfirmasi dapat
+                    <b>dibatalkan hanya oleh Production Manager</b> (alasan wajib): status kembali Dikirim dan riwayatnya tetap tersimpan. Retur yang sudah <b>3 hari</b> atau lebih
                     belum dikonfirmasi diberi penanda <em>Terlambat</em>, diurutkan paling atas, dan diingatkan lewat banner
                     di Dashboard sampai berstatus Diterima (hanya pengingat, tidak memblokir).
                 </div>
@@ -893,9 +895,24 @@
                     </div>
                     <button type="submit" class="btn btn-primary">Konfirmasi Diterima</button>
                 </form>
+                <form id="supplierReturnCancelForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Batalkan konfirmasi retur (Diterima)</label>
+                        <select class="form-select" id="srcCancelEvent" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Dibatalkan oleh (Production Manager)</label>
+                        <select class="form-select" id="srcCancelPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan pembatalan</label>
+                        <input class="form-input" id="srcCancelReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-secondary">Batalkan Konfirmasi</button>
+                </form>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>Event</th><th>Dikirim</th><th>Batch</th><th>Supplier</th><th>Qty</th><th>Asal</th><th>Status</th><th>Diterima / Catatan</th></tr></thead>
+                        <thead><tr><th>Event</th><th>Dikirim</th><th>Batch</th><th>Supplier</th><th>Qty</th><th>Asal</th><th>Status</th><th>Diterima / Catatan</th><th>Riwayat</th></tr></thead>
                         <tbody id="supplierReturnTable"></tbody>
                     </table>
                 </div>
