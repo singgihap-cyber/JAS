@@ -1928,3 +1928,51 @@ def test_aa_chain_audit_endpoint(client, supplier_id, pic_id):
     assert "Jenis seharusnya" in rows[0]["message"]
     assert client.get("/api/audit/aa-chain", params={"batch_id": 999}).json() == []
     assert len(client.get("/api/audit/aa-chain", params={"hijau_only": "false"}).json()) == 1
+
+
+# ---- Fase 38 (aturan bisnis terbuka) ----
+
+def test_api_on_off_mismatch_is_422(client, supplier_id, pic_id):
+    body = {"event_date": "2026-09-17", "pic_user_id": pic_id, "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING", "net_quantity": "55.500",
+            "on_spec_qty": "50.000", "off_spec_qty": "5.000"}
+    r = client.post("/api/receiving", json=body)
+    assert r.status_code == 422 and "harus sama persis" in r.text
+    body["off_spec_qty"] = "5.500"
+    assert client.post("/api/receiving", json=body).status_code == 201
+
+def test_api_supplier_return_flow(client, supplier_id, pic_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-17", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000", "off_spec_qty": "3.000"})
+    assert r.status_code == 201, r.text
+    [row] = client.get("/api/supplier-returns").json()
+    assert row["status"] == "DIKIRIM" and row["quantity"] == "3.000" and row["supplier_name"] == "WARDOYO"
+    eid = row["event_id"]
+    assert client.post("/api/supplier-returns/9999/confirm-received",
+                       json={"received_date": "2026-09-20", "actor_user_id": pic_id}).status_code == 404
+    bad = client.post(f"/api/supplier-returns/{eid}/confirm-received",
+                      json={"received_date": "2026-09-16", "actor_user_id": pic_id})
+    assert bad.status_code == 422
+    ok = client.post(f"/api/supplier-returns/{eid}/confirm-received",
+                     json={"received_date": "2026-09-20", "actor_user_id": pic_id, "note": "ok"})
+    assert ok.status_code == 201 and ok.json()["return_event_id"] == eid
+    assert client.post(f"/api/supplier-returns/{eid}/confirm-received",
+                       json={"received_date": "2026-09-20", "actor_user_id": pic_id}).status_code == 422
+    assert client.get("/api/supplier-returns?status=DIKIRIM").json() == []
+    [done] = client.get("/api/supplier-returns?status=DITERIMA").json()
+    assert done["received_date"] == "2026-09-20" and done["note"] == "ok"
+    assert client.get("/api/supplier-returns?status=APA").status_code == 422
+
+def test_api_sortation_start_required_and_order(client, supplier_id, pic_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-06-10", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "50.000"})
+    bid = r.json()["batch"]["batch_id"]
+    base = {"pic_user_id": pic_id, "batch_id": bid, "eg_qty": "9.000"}
+    assert client.post("/api/sortation", json=base).status_code == 422  # tanpa event_date
+    bad = client.post("/api/sortation", json={**base, "event_date": "2026-06-18", "end_date": "2026-06-15"})
+    assert bad.status_code == 422 and "MULAI" in bad.text
+    ok = client.post("/api/sortation", json={**base, "event_date": "2026-06-15", "end_date": "2026-06-18"})
+    assert ok.status_code == 201, ok.text
+

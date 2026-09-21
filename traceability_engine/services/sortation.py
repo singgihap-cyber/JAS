@@ -108,6 +108,16 @@ ambiguity instead of guessing):
    with every other phase using `event_date` for the activity date); "end
    date" is recorded in `notes` instead, the same treatment as Steaming's
    "end time" (Fase 6 #5).
+
+10. **[Fase 38] Tanggal MULAI sortasi WAJIB.** Keputusan user 2026-09-21:
+    berlaku untuk semua sortasi baru via API dan UI (tidak ada jalur
+    pengecualian riwayat di `record_sortation`). `event_date` sudah wajib di
+    skema; yang ditambahkan: (a) `event_date` kosong ditolak di service;
+    (b) `end_date` lebih awal dari `event_date` ditolak (tanda tanggal selesai
+    tertulis di kolom mulai, kesalahan yang memicu kasus batch
+    `030218-260618-00`); (c) UI tidak lagi mengisi tanggal Sortasi otomatis
+    dengan hari ini -- operator harus memilihnya sendiri. Server tidak bisa
+    memverifikasi bahwa tanggal itu benar-benar tanggal mulai.
 """
 from __future__ import annotations
 
@@ -259,6 +269,14 @@ def record_sortation(session: Session, data: SortationInput) -> ProcessEvent:
     source = session.get(Batch, data.batch_id)
     if source is None:
         raise ValueError(f"Batch {data.batch_id} does not exist.")
+    if data.event_date is None:
+        raise ValueError("Tanggal MULAI sortasi (event_date) wajib diisi.")
+    if data.end_date is not None and data.end_date < data.event_date:
+        raise ValueError(
+            f"Tanggal selesai sortasi ({data.end_date}) tidak boleh lebih awal dari "
+            f"tanggal MULAI ({data.event_date}). Kemungkinan tanggal selesai terisi "
+            f"di kolom tanggal mulai -- periksa kembali."
+        )
 
     initial_qty = _resolve_quantity(session, data.batch_id, data.initial_qty)
     if initial_qty <= 0:

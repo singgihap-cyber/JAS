@@ -268,3 +268,23 @@ class AuditLog(Base):
     timestamp: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
     before_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     after_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class SupplierReturnReceipt(Base):
+    """Fase 38 -- konfirmasi bahwa supplier SUDAH MENERIMA barang retur.
+
+    Status retur dua tahap: DIKIRIM = ada event SUPPLIER_RETURN (Fase 26/29);
+    DITERIMA = ada baris di tabel ini untuk event itu. Tabel baru (bukan kolom
+    tambahan) supaya `create_all` cukup untuk DB produksi yang sudah berjalan,
+    tanpa ALTER TABLE. Satu konfirmasi per event (UNIQUE).
+    """
+
+    __tablename__ = "supplier_return_receipts"
+    __table_args__ = (UniqueConstraint("return_event_id", name="uq_supplier_return_receipt_event"),)
+
+    receipt_id: Mapped[int] = mapped_column(primary_key=True)
+    return_event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"))
+    received_date: Mapped[dt.date] = mapped_column(Date)
+    confirmed_by: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    confirmed_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

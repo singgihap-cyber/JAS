@@ -55,8 +55,11 @@ ambiguity instead of guessing):
    butuh Production Manager (berbeda dari `return_to_supplier()` Fase 26 yang
    untuk batch REJECTED) -- pengembalian off-spec adalah bagian dari
    penerimaan itu sendiri, dicatat oleh PIC Receiving. `off_spec_qty` tidak
-   boleh melebihi `net_quantity`. `[UNCONFIRMED]` apakah `on_spec + off_spec`
-   harus = netto (tidak divalidasi; tidak ada sumber yang menetapkannya).
+   boleh melebihi `net_quantity`. **[Fase 38 -- DIPUTUSKAN]** bila `on_spec_qty`
+   DAN `off_spec_qty` sama-sama diisi, jumlahnya harus SAMA PERSIS dengan netto
+   (keputusan user 2026-09-21; tanpa toleransi; ditolak `ValueError` -> 422).
+   Bila hanya salah satu diisi, tidak ada yang bisa dijumlahkan sehingga tidak
+   divalidasi (hanya batas 0..netto).
    Teks lama di bawah (sebelum Fase 29) tetap berlaku untuk `smell_test`
    dan `on_spec_qty` -- keduanya hanya dicatat.
 
@@ -217,6 +220,19 @@ def record_receiving(session: Session, data: ReceivingInput) -> ProcessEvent:
         raise ValueError("off_spec_qty cannot be negative.")
     if data.off_spec_qty is not None and data.off_spec_qty > data.net_quantity:
         raise ValueError("off_spec_qty cannot exceed net_quantity (PB 'net' field).")
+    if data.on_spec_qty is not None and data.on_spec_qty < 0:
+        raise ValueError("on_spec_qty cannot be negative.")
+    if (
+        data.on_spec_qty is not None
+        and data.off_spec_qty is not None
+        and data.on_spec_qty + data.off_spec_qty != data.net_quantity
+    ):
+        # Fase 38 -- keputusan user 2026-09-21: blokir bila tidak sama persis.
+        raise ValueError(
+            f"on_spec_qty ({data.on_spec_qty}) + off_spec_qty ({data.off_spec_qty}) = "
+            f"{data.on_spec_qty + data.off_spec_qty} harus sama persis dengan netto "
+            f"({data.net_quantity})."
+        )
 
     generated = resolve_generated_batch_number(session, data)
     merge_into = _find_mergeable_batch(session, generated) if generated else None

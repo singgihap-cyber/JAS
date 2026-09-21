@@ -142,6 +142,9 @@
                         dikembalikan ke supplier</strong>: sistem mencatat event <em>Pengembalian ke Supplier</em>
                         sebesar off-spec pada transaksi yang sama, sehingga stok batch = netto − off-spec. Batch
                         tidak ditandai ditolak, dan off-spec tidak boleh negatif atau melebihi netto.
+                        Bila On-Spec <b>dan</b> Off-Spec sama-sama diisi, jumlahnya harus <b>sama persis</b>
+                        dengan Netto (tanpa toleransi). Retur baru berstatus <em>Dikirim</em>; konfirmasi
+                        diterima supplier dilakukan di halaman Adjustment.
                     </div>
                     <div class="form-row">
                         <div class="form-group">
@@ -851,6 +854,41 @@
                     <table>
                         <thead><tr><th>Batch</th><th>Supplier</th><th>Ditolak</th><th>Alasan</th><th>Sisa</th><th>Dikembalikan</th><th>Status</th><th>Peringatan</th></tr></thead>
                         <tbody id="dispositionTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">📦 Status Retur ke Supplier (Dikirim → Diterima)</div>
+                <div class="info-box">
+                    Setiap pengembalian ke supplier (off-spec saat Receiving maupun batch REJECTED) berstatus
+                    <b>Dikirim</b> sejak dicatat. Setelah supplier menerima barangnya, konfirmasikan di sini dengan
+                    tanggal terima (tidak boleh sebelum tanggal kirim, satu konfirmasi per retur). Konfirmasi
+                    tidak mengubah stok dan tidak dibatasi role; tercatat di Audit Log.
+                </div>
+                <form id="supplierReturnConfirmForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Retur yang menunggu konfirmasi</label>
+                        <select class="form-select" id="srcEvent" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Dikonfirmasi oleh</label>
+                        <select class="form-select" id="srcPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:140px;margin-bottom:0">
+                        <label class="form-label">Tanggal diterima supplier</label>
+                        <input type="date" class="form-input" id="srcTanggal" required>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Catatan (opsional)</label>
+                        <input class="form-input" id="srcNote">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Konfirmasi Diterima</button>
+                </form>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Event</th><th>Dikirim</th><th>Batch</th><th>Supplier</th><th>Qty</th><th>Asal</th><th>Status</th><th>Diterima / Catatan</th></tr></thead>
+                        <tbody id="supplierReturnTable"></tbody>
                     </table>
                 </div>
             </div>

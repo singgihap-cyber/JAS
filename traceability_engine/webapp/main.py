@@ -41,6 +41,7 @@ from .routers import (
     rendemen,
     date_order,
     disposition,
+    supplier_returns,
     rework,
     sortation,
     steam_dry,
@@ -141,6 +142,7 @@ app.include_router(rendemen.router, prefix=api_prefix)
 app.include_router(aa_chain.router, prefix=api_prefix)
 app.include_router(date_order.router, prefix=api_prefix)
 app.include_router(disposition.router, prefix=api_prefix)
+app.include_router(supplier_returns.router, prefix=api_prefix)
 app.include_router(batches.router, prefix=api_prefix)
 
 _static_dir = Path(__file__).parent / "static"

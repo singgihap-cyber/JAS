@@ -86,7 +86,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
-        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderAaChain(); }
+        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderSupplierReturns(); renderAaChain(); }
         if (page === 'stock') renderStockSummary();
         if (page === 'batch-history') { renderRendemenSortation(); renderRendemenMixing(); }
     });
@@ -116,7 +116,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -378,6 +378,11 @@ document.getElementById('receivingForm').addEventListener('submit', async (e) =>
     e.preventDefault();
     const netto = parseFloat(document.getElementById('rNetto').value);
     if (!netto || netto <= 0) { toast('Netto harus lebih dari 0.', 'error'); return; }
+    // Pra-cek cepat saja; penegak aturan (on+off = netto) tetap server, services/receiving.py (Fase 38).
+    const onS = document.getElementById('rOnSpec').value, offS = document.getElementById('rOffSpec').value;
+    if (onS !== '' && offS !== '' && Math.round((Number(onS) + Number(offS)) * 1000) !== Math.round(netto * 1000)) {
+        toast(`On-Spec (${onS}) + Off-Spec (${offS}) harus sama persis dengan Netto (${netto}).`, 'error', 6000); return;
+    }
     const payload = {
         event_date: document.getElementById('rTanggal').value,
         pic_user_id: Number(document.getElementById('rPic').value),
@@ -536,6 +541,8 @@ const STAGE_DEFS = [
     {
         key: 'sortation', label: '🧺 Sortasi', endpoint: '/sortation',
         dateLabel: 'Tanggal Mulai Sortasi (sebelum uji MD/KW pada bagian yang sudah disortir)',
+        noDefaultDate: true,  // Fase 38: operator wajib memilih tanggal MULAI sendiri (bukan hari ini)
+        dateHint: 'Wajib diisi manual. Ini tanggal MULAI sortasi, bukan tanggal selesai (tanggal selesai ada di kolom di bawah).',
         fields: [
             { id: 'initial_qty', label: 'Qty Awal (kg) — kosongkan = qty batch saat ini', type: 'number', step: '0.001' },
             { id: 'gourmet_qty', label: 'Gourmet (kg)', type: 'number', step: '0.001' },
@@ -654,7 +661,8 @@ function renderProsesFields() {
     host.innerHTML = `<div class="form-divider">${def.label}</div>
         <div class="form-group">
             <label class="form-label">${def.dateLabel || 'Tanggal'} <span style="color:var(--danger)">*</span></label>
-            <input type="date" class="form-input" id="pf_event_date" value="${todayStr()}" required>
+            <input type="date" class="form-input" id="pf_event_date" value="${def.noDefaultDate ? '' : todayStr()}" required>
+            ${def.dateHint ? `<div class="form-hint">${def.dateHint}</div>` : ''}
         </div>` +
         def.fields.map(f => {
             const req = f.required ? ' <span style="color:var(--danger)">*</span>' : '';
@@ -815,6 +823,15 @@ document.getElementById('prosesForm').addEventListener('submit', async (e) => {
     const picId = document.getElementById('pPic').value;
     if (!def || !batchId) { toast('Tahap dan batch harus dipilih.', 'error'); return; }
     if (!picId) { toast('PIC harus dipilih.', 'error'); return; }
+    if (!document.getElementById('pf_event_date').value) {
+        toast(def.key === 'sortation' ? 'Tanggal MULAI sortasi wajib diisi.' : 'Tanggal wajib diisi.', 'error'); return;
+    }
+    if (def.key === 'sortation') {
+        const endEl = document.getElementById('pf_end_date');
+        if (endEl && endEl.value && endEl.value < document.getElementById('pf_event_date').value) {
+            toast('Tanggal selesai tidak boleh lebih awal dari tanggal MULAI sortasi.', 'error', 6000); return;
+        }
+    }
 
     const payload = {
         event_date: document.getElementById('pf_event_date').value,
@@ -1594,6 +1611,63 @@ document.getElementById('returnForm').addEventListener('submit', async (e) => {
         await refreshBatches();
         await renderAuditLog();
         await renderDisposition();
+    } catch (err) { toastError(err, 6000); }
+});
+
+// ─── STATUS RETUR KE SUPPLIER: DIKIRIM -> DITERIMA (Fase 38) ────────────
+// Tanpa batasan role untuk konfirmasi (services/supplier_return.py); server
+// menolak tanggal terima < tanggal kirim dan konfirmasi ganda.
+const SUPPLIER_RETURN_SOURCE = { RECEIVING_OFF_SPEC: 'Off-spec Receiving', REJECTED_BATCH: 'Batch REJECTED' };
+
+async function renderSupplierReturns() {
+    const tbody = document.getElementById('supplierReturnTable');
+    const sel = document.getElementById('srcEvent');
+    if (!tbody || !sel) return;
+    let rows;
+    try { rows = await api('GET', '/supplier-returns'); }
+    catch (err) { toastError(err, 6000); return; }
+    tbody.innerHTML = rows.length ? rows.map(r => {
+        const sent = r.status === 'DIKIRIM';
+        const badge = sent
+            ? `<span class="badge badge-primary">Dikirim${r.days_outstanding != null ? ' (' + r.days_outstanding + ' hari)' : ''}</span>`
+            : '<span class="badge badge-success">Diterima supplier</span>';
+        return `<tr>
+            <td>#${r.event_id}</td>
+            <td>${r.event_date}</td>
+            <td class="batch-id">${r.batch_id ? '#' + r.batch_id + ' ' + (r.batch_number || '') : '–'}</td>
+            <td>${r.supplier_name || '–'}</td>
+            <td>${fmtQty(r.quantity)} ${r.unit}</td>
+            <td>${SUPPLIER_RETURN_SOURCE[r.source] || r.source}</td>
+            <td>${badge}</td>
+            <td>${r.received_date || '–'}${r.note ? ' — ' + r.note : ''}</td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Belum ada retur ke supplier</td></tr>';
+    const open = rows.filter(r => r.status === 'DIKIRIM');
+    const current = sel.value;
+    sel.innerHTML = open.length
+        ? '<option value="">Pilih retur...</option>' + open.map(r =>
+            `<option value="${r.event_id}">#${r.event_id} — ${r.supplier_name || '?'} · ${fmtQty(r.quantity)} ${r.unit} · dikirim ${r.event_date}</option>`).join('')
+        : '<option value="">Tidak ada retur yang menunggu konfirmasi</option>';
+    if (current && open.some(r => String(r.event_id) === current)) sel.value = current;
+}
+
+document.getElementById('srcTanggal').value = todayStr();
+document.getElementById('supplierReturnConfirmForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventId = document.getElementById('srcEvent').value;
+    const picId = document.getElementById('srcPic').value;
+    if (!eventId || !picId) { toast('Retur dan pengonfirmasi harus dipilih.', 'error'); return; }
+    try {
+        await api('POST', `/supplier-returns/${eventId}/confirm-received`, {
+            received_date: document.getElementById('srcTanggal').value,
+            actor_user_id: Number(picId),
+            note: document.getElementById('srcNote').value.trim() || null,
+        });
+        toast(`✅ Retur #${eventId} dikonfirmasi diterima supplier.`, 'success');
+        document.getElementById('supplierReturnConfirmForm').reset();
+        document.getElementById('srcTanggal').value = todayStr();
+        await renderSupplierReturns();
+        await renderAuditLog();
     } catch (err) { toastError(err, 6000); }
 });
 

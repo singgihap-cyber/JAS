@@ -804,3 +804,41 @@ class DispositionRowOut(BaseModel):
     return_event_ids: list[int]
     used_after_rejection_event_ids: list[int]
     message: str
+
+
+# ------------------------------------------- status retur supplier (Fase 38)
+class SupplierReturnConfirm(BaseModel):
+    received_date: dt.date  # tanggal supplier menerima barang retur
+    actor_user_id: int  # siapa yang mengonfirmasi (tanpa batasan role, services/supplier_return.py)
+    note: Optional[str] = None
+
+
+class SupplierReturnReceiptOut(BaseModel):
+    receipt_id: int
+    return_event_id: int
+    received_date: dt.date
+    confirmed_by: int
+    confirmed_at: Optional[dt.datetime] = None
+    note: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SupplierReturnRowOut(BaseModel):
+    """Mirrors services/supplier_return.py `SupplierReturnRow` field-for-field."""
+
+    event_id: int
+    event_date: dt.date
+    batch_id: Optional[int] = None
+    batch_number: Optional[str] = None
+    supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
+    quantity: Decimal
+    unit: str
+    source: str
+    reason: Optional[str] = None
+    status: str
+    received_date: Optional[dt.date] = None
+    confirmed_by: Optional[int] = None
+    note: Optional[str] = None
+    days_outstanding: Optional[int] = None
