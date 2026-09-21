@@ -778,6 +778,51 @@ class AaChangeFindingOut(BaseModel):
     result_jenis_label: str
     hijau_route: bool
     message: str
+    # Fase 42: status tinjau
+    review_status: str = "BARU"
+    review_note: Optional[str] = None
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[dt.datetime] = None
+
+
+class AaFindingReviewIn(BaseModel):
+    event_id: int
+    source_batch_id: int
+    result_batch_id: int
+    status: str  # DITINJAU | DIABAIKAN
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    note: str = Field(..., min_length=1)
+
+
+class AaFindingReviewOut(BaseModel):
+    review_id: int
+    event_id: int
+    source_batch_id: int
+    result_batch_id: int
+    status: str
+    reviewed_by: int
+    reviewed_at: Optional[dt.datetime] = None
+    note: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class BatchNumberCorrectionIn(BaseModel):
+    new_batch_number: str = Field(..., min_length=1)
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+
+
+class BatchNumberCorrectionOut(BaseModel):
+    correction_id: int
+    batch_id: int
+    old_batch_number: Optional[str] = None
+    new_batch_number: str
+    reason: str
+    actor_user_id: int
+    corrected_at: Optional[dt.datetime] = None
+
+    model_config = {"from_attributes": True}
 
 
 # ------------------------------------------- disposisi REJECTED (Fase 26)

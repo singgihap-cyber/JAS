@@ -7,8 +7,9 @@ Sortation, QC, MD) really fit the Hijau route, and pins the two gaps found
 
 Deliberate choices, all from reading the sheet:
 - Stem removal / blanching / curing / airdrying use the on-hand quantity
-  instead of retyping the sheet's rounded figure (PL/KR show 14.83 for
-  the third batch while LT's 14.825 is the exact value).
+  instead of retyping the sheet's figure. Fase 42 (user 2026-09-21): the
+  third batch's rounding gap (14.83 vs 14.825; SUSUT 11.11 vs 11.115) is
+  closed by using the sheet's PL/KR figures 14.83 and SUSUT 11.11 (final 3.72).
 - Drying = Sundrying (sheet KM) THEN Airdrying (sheet KR), confirmed by
   user 2026-09-19: one continuous drying run, weight recorded at the start
   of KM and at the end of KR only. The KM->KR handover weight is not
@@ -50,9 +51,9 @@ CASES = [
          final=D("5.77"), sort_date=dt.date(2026, 7, 7), lt_final=D("27.39"),
          outs={"gourmet": ("030118-260707-00", D("1.92")), "eg": ("030218-260707-00", D("3.85"))},
          supplier_code="18"),
-    dict(no="040024-260618-00", recv=dt.date(2026, 6, 18), net=D("15.1"), limbah=D("0.275"),
-         final=D("3.715"), sort_date=dt.date(2026, 7, 29), lt_final=D("14.825"),
-         outs={"eg": ("030224-260729-00", D("3.715"))}, supplier_code="24"),
+    dict(no="040024-260618-00", recv=dt.date(2026, 6, 18), net=D("15.1"), limbah=D("0.27"),
+         final=D("3.72"), sort_date=dt.date(2026, 7, 29), lt_final=D("14.83"),
+         outs={"eg": ("030224-260729-00", D("3.72"))}, supplier_code="24"),
 ]
 
 

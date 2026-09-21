@@ -14,7 +14,9 @@ Aturan (keputusan user 2026-09-21: "AA berubah di rute", laporan saja):
 - `hijau_route` = batch INPUT berasal dari rantai RAW_HIJAU (Hijau adalah
   grade BB 00, bukan Jenis; lihat Fase 30). `hijau_only=True` (default di API)
   hanya melaporkan temuan di rute Hijau.
-- Read-only, tanpa skema baru, tidak memblokir apa pun (sama seperti Fase 33).
+- Read-only, tidak memblokir apa pun (sama seperti Fase 33). Fase 42 menambah
+  status tinjau per temuan (`services/aa_review.py`); pendeteksiannya sendiri
+  tidak berubah.
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from .. import batch_number as bn
 from ..enums import BatchType, EventStatus, EventType, LinkRole
-from ..models import Batch, EventBatchLink, ProcessEvent
+from ..models import AaFindingReview, Batch, EventBatchLink, ProcessEvent
 
 _SKIPPED_EVENT_TYPES = (EventType.ADJUSTMENT, EventType.MIXING)
 
@@ -45,6 +47,11 @@ class AaChangeFinding:
     result_jenis_code: str
     result_jenis_label: str
     hijau_route: bool
+    # Fase 42: status tinjau (BARU bila belum ada baris `aa_finding_reviews`)
+    review_status: str = "BARU"
+    review_note: Optional[str] = None
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[dt.datetime] = None
 
     def message(self) -> str:
         return (
@@ -94,11 +101,13 @@ def _hijau_flags(session: Session, batches: dict[int, Batch]) -> dict[int, bool]
 
 
 def audit_aa_chain(
-    session: Session, batch_id: Optional[int] = None, hijau_only: bool = False
+    session: Session, batch_id: Optional[int] = None, hijau_only: bool = False,
+    review_status: Optional[str] = None,
 ) -> list[AaChangeFinding]:
     """Temuan perubahan AA resmi (01<->02) antara batch INPUT dan OUTPUT sebuah
     event. `batch_id` menyaring temuan yang menyentuh batch itu (sebagai sumber
-    atau hasil)."""
+    atau hasil). `review_status` (Fase 42: BARU/DITINJAU/DIABAIKAN/DIKOREKSI)
+    menyaring menurut status tinjau."""
     rows = (
         session.query(EventBatchLink.event_id, EventBatchLink.batch_id, EventBatchLink.role)
         .join(ProcessEvent, ProcessEvent.event_id == EventBatchLink.event_id)
@@ -119,6 +128,10 @@ def audit_aa_chain(
     } if by_event else {}
     hijau = _hijau_flags(session, batches)
 
+    reviews = {
+        (r.event_id, r.source_batch_id, r.result_batch_id): r
+        for r in session.query(AaFindingReview).all()
+    }
     out: list[AaChangeFinding] = []
     for eid in sorted(by_event):
         ev = events[eid]
@@ -150,4 +163,12 @@ def audit_aa_chain(
                     result_jenis_label=bn.JENIS_CODES[res.jenis_code],
                     hijau_route=is_hijau,
                 ))
+                rv = reviews.get((eid, src_id, res_id))
+                if rv is not None:
+                    out[-1].review_status = rv.status
+                    out[-1].review_note = rv.note
+                    out[-1].reviewed_by = rv.reviewed_by
+                    out[-1].reviewed_at = rv.reviewed_at
+                if review_status is not None and out[-1].review_status != review_status:
+                    out.pop()
     return out

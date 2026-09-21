@@ -308,3 +308,43 @@ class SupplierReturnHistory(Base):
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     occurred_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # catatan konfirmasi / alasan batal
+
+
+class AaFindingReview(Base):
+    """Fase 42 -- status tinjau sebuah temuan audit perubahan AA (Fase 36).
+
+    Temuan dikenali lewat kunci (event, batch sumber, batch hasil). Tanpa baris
+    = BARU. Status: DITINJAU (dianggap wajar / sudah dilihat), DIABAIKAN, atau
+    DIKOREKSI (diisi otomatis saat Production Manager mengganti nomor batch
+    yang terlibat). Tabel baru -> `create_all` cukup untuk DB produksi.
+    """
+
+    __tablename__ = "aa_finding_reviews"
+    __table_args__ = (
+        UniqueConstraint("event_id", "source_batch_id", "result_batch_id", name="uq_aa_finding_review"),
+    )
+
+    review_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
+    source_batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"))
+    result_batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"))
+    status: Mapped[str] = mapped_column(String(12))  # DITINJAU | DIABAIKAN | DIKOREKSI
+    reviewed_by: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    reviewed_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class BatchNumberCorrection(Base):
+    """Fase 42 -- riwayat koreksi nomor batch oleh Production Manager (nomor
+    lama -> baru, alasan wajib). Batch dan event tetap tertaut lewat ID, jadi
+    silsilah tidak putus."""
+
+    __tablename__ = "batch_number_corrections"
+
+    correction_id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"), index=True)
+    old_batch_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    new_batch_number: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())

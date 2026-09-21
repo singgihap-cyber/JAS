@@ -40,6 +40,12 @@
                     <a href="#" id="supplierReturnBannerLink">Buka Status Retur ke Supplier →</a>
                 </div>
             </div>
+            <div class="section" id="aaChainBanner" style="display:none">
+                <div class="info-box" style="border-left:4px solid var(--danger)">
+                    <b>🧬 Temuan perubahan Jenis (AA) belum ditinjau</b> — <span id="aaChainBannerText"></span>
+                    <a href="#" id="aaChainBannerLink">Buka Audit Perubahan Jenis (AA) →</a>
+                </div>
+            </div>
             <div class="section">
                 <div class="section-title">📈 Ringkasan Batch Aktif</div>
                 <div class="info-box">
@@ -944,17 +950,58 @@
                 <div class="info-box">
                     Jenis (AA) seharusnya tidak berubah sepanjang rute (Fase 33). Tabel ini menampilkan batch hasil
                     yang AA-nya berbeda dari batch sumber pada event yang sama (Mixing dikecualikan; AA lama 03/04
-                    dilewati). Laporan saja — tidak memblokir; periksa kemungkinan salah input nomor batch.
+                    dilewati). Laporan saja — tidak memblokir. Production Manager dapat menandai temuan (Ditinjau/Diabaikan) atau mengganti nomor batch yang salah (jejak lengkap, tercatat di Audit Log); temuan yang nomornya diganti otomatis berstatus Dikoreksi.
                 </div>
                 <label style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:13px">
                     <input type="checkbox" id="aaChainHijauOnly" checked> Hanya rute Hijau
                 </label>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>Event</th><th>Tanggal</th><th>Batch Sumber</th><th>AA Sumber</th><th>Batch Hasil</th><th>AA Hasil</th><th>Rute</th></tr></thead>
+                        <thead><tr><th>Event</th><th>Tanggal</th><th>Batch Sumber</th><th>AA Sumber</th><th>Batch Hasil</th><th>AA Hasil</th><th>Rute</th><th>Status Tinjau</th></tr></thead>
                         <tbody id="aaChainTable"></tbody>
                     </table>
                 </div>
+                <form id="aaReviewForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Tandai temuan</label>
+                        <select class="form-select" id="aaReviewFinding" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" id="aaReviewStatus" required>
+                            <option value="DITINJAU">Ditinjau (wajar)</option>
+                            <option value="DIABAIKAN">Diabaikan</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Oleh (Production Manager)</label>
+                        <select class="form-select" id="aaReviewPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Catatan</label>
+                        <input class="form-input" id="aaReviewNote" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Tandai</button>
+                </form>
+                <form id="batchNumberCorrectForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Koreksi nomor batch (batch pada temuan)</label>
+                        <select class="form-select" id="bncBatch" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:170px;margin-bottom:0">
+                        <label class="form-label">Nomor batch baru</label>
+                        <input class="form-input" id="bncNewNumber" placeholder="0202024-260918-00" required>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Oleh (Production Manager)</label>
+                        <select class="form-select" id="bncPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan koreksi</label>
+                        <input class="form-input" id="bncReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-secondary">Ganti Nomor Batch</button>
+                </form>
             </div>
 
             <div class="section">

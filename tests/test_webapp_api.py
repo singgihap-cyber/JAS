@@ -2041,3 +2041,41 @@ def test_api_bulk_confirm_supplier_returns(client, supplier_id, pic_id):
     assert ok.status_code == 201 and len(ok.json()) == 2
     assert client.get("/api/supplier-returns?status=DIKIRIM").json() == []
     assert client.post(url, json=body).status_code == 422  # sudah diterima semua
+
+
+# ---- Fase 42 (tandai-tinjau AA + koreksi nomor batch) ----
+
+def test_api_aa_review_and_batch_number_correction(client, supplier_id, pic_id, pm_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_HIJAU", "net_quantity": "100.000", "jenis_code": "02", "grade_code": "00"})
+    b = r.json()["batch"]["batch_id"]
+    s = client.post("/api/sortation", json={
+        "event_date": "2026-09-21", "pic_user_id": pic_id, "batch_id": b,
+        "eg_qty": "60.000", "process_code": "00", "eg_batch_number": "0102024-260918-00"})
+    assert s.status_code in (200, 201), s.text
+    [f] = client.get("/api/audit/aa-chain").json()
+    assert f["review_status"] == "BARU"
+    assert len(client.get("/api/audit/aa-chain", params={"review_status": "BARU"}).json()) == 1
+    key = {"event_id": f["event_id"], "source_batch_id": f["source_batch_id"],
+           "result_batch_id": f["result_batch_id"], "status": "DITINJAU", "note": "Wajar"}
+
+    assert client.post("/api/audit/aa-chain/review", json={**key, "actor_user_id": pic_id}).status_code == 403
+    ok = client.post("/api/audit/aa-chain/review", json={**key, "actor_user_id": pm_id})
+    assert ok.status_code == 201 and ok.json()["status"] == "DITINJAU"
+    assert client.get("/api/audit/aa-chain", params={"review_status": "BARU"}).json() == []
+    assert client.get("/api/audit/aa-chain").json()[0]["review_status"] == "DITINJAU"
+
+    rid = f["result_batch_id"]
+    body = {"new_batch_number": "0202024-260918-00", "reason": "Salah AA"}
+    assert client.post(f"/api/batches/{rid}/correct-number", json={**body, "actor_user_id": pic_id}).status_code == 403
+    assert client.post("/api/batches/9999/correct-number", json={**body, "actor_user_id": pm_id}).status_code == 404
+    bad = client.post(f"/api/batches/{rid}/correct-number",
+                      json={**body, "new_batch_number": "ngawur", "actor_user_id": pm_id})
+    assert bad.status_code == 422
+    done = client.post(f"/api/batches/{rid}/correct-number", json={**body, "actor_user_id": pm_id})
+    assert done.status_code == 201 and done.json()["old_batch_number"] == "0102024-260918-00"
+    assert client.get("/api/audit/aa-chain").json() == []
+    hist = client.get(f"/api/batches/{rid}/number-history").json()
+    assert [h["new_batch_number"] for h in hist] == ["0202024-260918-00"]
+    assert client.get(f"/api/batches/{rid}").json()["batch_number"] == "0202024-260918-00"

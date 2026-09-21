@@ -116,7 +116,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -303,6 +303,7 @@ document.getElementById('supplierReturnBannerLink').addEventListener('click', (e
 
 async function renderDashboard() {
     renderSupplierReturnBanner();
+    renderAaChainBanner();
     const data = await api('GET', '/batches?status=ACTIVE');
     const tbody = document.getElementById('dashboardTable');
     tbody.innerHTML = data.length ? data.slice(0, 15).map(b => `
@@ -1781,6 +1782,11 @@ document.getElementById('supplierReturnCancelForm').addEventListener('submit', a
 });
 
 // ─── AUDIT PERUBAHAN AA RUTE HIJAU (Fase 36, laporan atas Fase 33) ──────
+function aaStatusBadge(r) {
+    const cls = {BARU: 'danger', DITINJAU: 'success', DIABAIKAN: 'gray', DIKOREKSI: 'primary'}[r.review_status] || 'gray';
+    const note = r.review_note ? ` title="${String(r.review_note).replace(/"/g, '&quot;')}"` : '';
+    return `<span class="badge badge-${cls}"${note}>${r.review_status}</span>`;
+}
 async function renderAaChain() {
     const tbody = document.getElementById('aaChainTable');
     if (!tbody) return;
@@ -1796,9 +1802,69 @@ async function renderAaChain() {
             <td class="batch-id">#${r.result_batch_id} ${r.result_batch_number || ''}</td>
             <td><span class="badge badge-danger">⚠️ ${r.result_jenis_code} ${r.result_jenis_label}</span></td>
             <td>${r.hijau_route ? 'Hijau' : 'Lainnya'}</td>
+            <td>${aaStatusBadge(r)}</td>
         </tr>`).join('')
-        : '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Tidak ada perubahan Jenis (AA) di rute</td></tr>';
+        : '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Tidak ada perubahan Jenis (AA) di rute</td></tr>';
+    const sel = document.getElementById('aaReviewFinding');
+    if (sel) sel.innerHTML = rows.map(r => `<option value='${JSON.stringify({e: r.event_id, s: r.source_batch_id, r: r.result_batch_id})}'>` +
+        `${r.event_type} #${r.event_id}: ${r.source_batch_number || '#' + r.source_batch_id} → ${r.result_batch_number || '#' + r.result_batch_id} [${r.review_status}]</option>`).join('');
+    const bsel = document.getElementById('bncBatch');
+    if (bsel) {
+        const seen = new Map();
+        rows.forEach(r => {
+            seen.set(r.source_batch_id, r.source_batch_number);
+            seen.set(r.result_batch_id, r.result_batch_number);
+        });
+        bsel.innerHTML = [...seen].map(([id, no]) => `<option value="${id}">#${id} ${no || ''}</option>`).join('');
+    }
 }
+async function renderAaChainBanner() {
+    const box = document.getElementById('aaChainBanner');
+    if (!box) return;
+    try {
+        const rows = await api('GET', '/audit/aa-chain?hijau_only=true&review_status=BARU');
+        box.style.display = rows.length ? '' : 'none';
+        if (rows.length) document.getElementById('aaChainBannerText').textContent =
+            `${rows.length} temuan perubahan Jenis (AA) di rute Hijau berstatus Baru.`;
+    } catch (err) { box.style.display = 'none'; }
+}
+document.getElementById('aaChainBannerLink').addEventListener('click', (e) => {
+    e.preventDefault();
+    const nav = document.querySelector('.nav-item[data-page="adjustment"]');
+    if (nav) nav.click();
+});
+document.getElementById('aaReviewForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const raw = document.getElementById('aaReviewFinding').value;
+    const picId = document.getElementById('aaReviewPic').value;
+    if (!raw || !picId) { toast('Temuan dan Production Manager harus dipilih.', 'error'); return; }
+    const k = JSON.parse(raw);
+    try {
+        await api('POST', '/audit/aa-chain/review', {
+            event_id: k.e, source_batch_id: k.s, result_batch_id: k.r,
+            status: document.getElementById('aaReviewStatus').value,
+            actor_user_id: Number(picId), note: document.getElementById('aaReviewNote').value.trim(),
+        });
+        toast('✅ Status tinjau temuan disimpan.', 'success');
+        document.getElementById('aaReviewNote').value = '';
+        await renderAaChain(); renderAaChainBanner();
+    } catch (err) { toastError(err, 6000); }
+});
+document.getElementById('batchNumberCorrectForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const batchId = document.getElementById('bncBatch').value;
+    const picId = document.getElementById('bncPic').value;
+    if (!batchId || !picId) { toast('Batch dan Production Manager harus dipilih.', 'error'); return; }
+    try {
+        await api('POST', `/batches/${batchId}/correct-number`, {
+            new_batch_number: document.getElementById('bncNewNumber').value.trim(),
+            actor_user_id: Number(picId), reason: document.getElementById('bncReason').value.trim(),
+        });
+        toast(`✅ Nomor batch #${batchId} dikoreksi.`, 'success');
+        document.getElementById('batchNumberCorrectForm').reset();
+        await renderAaChain(); renderAaChainBanner(); await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
 document.getElementById('aaChainHijauOnly').addEventListener('change', renderAaChain);
 
 async function renderAuditLog() {
