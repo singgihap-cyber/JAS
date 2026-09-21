@@ -11,19 +11,19 @@ sorted output --
 The genealogy already holds both numbers, so nothing new is stored:
 the numerator is walked backward from the sortation's input batch to the
 RECEIVING event(s) that created its ancestors; the denominator is the
-sortation's INPUT quantity (Fase 35; before that it was the sum of the
-OUTPUT links, the sheet's `TOTAL (KG)` -- identical whenever shrinkage is 0).
+sum of the sortation's OUTPUT links (the sheet's `TOTAL (KG)`). Fase 35: the
+user briefly chose INPUT, then corrected it the same day -- OUTPUT is right
+(50 kg in, 9 kg out -> 50 / 9 = 5.556); see decision 2.
 
 Decisions (CLAUDE.md rule 11: document ambiguity instead of guessing):
 
 1. **Numerator = received net weight (PPH `NETTO`), before Lepas Tangkai.**
    Matches the sheet (77.74, not the 75.44 left after stem removal).
-2. **Denominator = the sortation's INPUT quantity** (decided by the user,
-   2026-09-21, Fase 35; closes the open question of Fase 24). Sortation
-   shrinkage therefore raises... nothing: the ratio is raw weight per kg
-   *fed into* the sortation, so weight lost during sorting is not hidden
-   in the base. In every real row TOTAL == input (shrinkage 0), so the
-   known data are unchanged. Output total and shrinkage are still returned.
+2. **Denominator = sum of the sortation's OUTPUT quantities** (the sheet's
+   TOTAL). Confirmed by the user 2026-09-21 (Fase 35, correcting an earlier
+   pick of INPUT): the correct rendemen is based on the final output, e.g.
+   50 kg in, 9 kg out -> rendemen 5.556. Input weight and shrinkage are
+   still returned so a report can show them. Closes the Fase 24 open question.
 3. **Proportional attribution.** A batch is not always consumed whole and
    not always from a single ancestor (partial re-sortation, Mixing of up to
    33 sources). Raw weight is therefore attributed by mass fraction: when an
@@ -79,8 +79,8 @@ class SortationRendemen:
     output_quantity: Decimal  # SORT "TOTAL (KG)"
     shrinkage_qty: Decimal
     raw_weight: Optional[Decimal]  # SORT "berat hijau" (None = lineage unknown)
-    rendemen: Optional[Decimal]  # raw_weight / input_quantity (Fase 35)
-    yield_percent: Optional[Decimal]  # input_quantity / raw_weight * 100
+    rendemen: Optional[Decimal]  # raw_weight / output_quantity
+    yield_percent: Optional[Decimal]  # output_quantity / raw_weight * 100
     complete: bool
     outputs: list[SortationOutput] = field(default_factory=list)
 
@@ -196,9 +196,9 @@ def sortation_rendemen(session: Session, event_id: int,
     out_total = sum((o.quantity for o in outputs), ZERO)
     raw = attr.taken(event_id, src.batch_id)
     rendemen = yield_pct = None
-    if raw is not None and src.quantity > ZERO and raw > ZERO:
-        rendemen = (raw / src.quantity).quantize(_RATIO_Q, ROUND_HALF_UP)
-        yield_pct = (src.quantity / raw * 100).quantize(_RATIO_Q, ROUND_HALF_UP)
+    if raw is not None and out_total > ZERO and raw > ZERO:
+        rendemen = (raw / out_total).quantize(_RATIO_Q, ROUND_HALF_UP)
+        yield_pct = (out_total / raw * 100).quantize(_RATIO_Q, ROUND_HALF_UP)
 
     out_rows = []
     for o in outputs:

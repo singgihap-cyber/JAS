@@ -141,17 +141,17 @@ def test_unknown_lineage_is_reported_not_guessed(session, staff_user):
     assert r.complete is False and r.output_quantity == D("10")
 
 
-def test_shrinkage_in_sortation_uses_input_total(session, staff_user, supplier):
+def test_shrinkage_in_sortation_uses_output_total(session, staff_user, supplier):
     uid = staff_user.user_id
     g = _green(session, uid, supplier, D("50"))
     ev = record_sortation(session, SortationInput(
         event_date=D0, pic_user_id=uid, batch_id=g.batch_id, eg_qty=D("9")))
     r = sortation_rendemen(session, ev.event_id)
     # input defaults to on-hand (50); output 9 -> shrinkage 41.
-    # Fase 35 (user 2026-09-21): base = INPUT total, so 50 raw / 50 fed in = 1.
+    # Fase 35 (user 2026-09-21): base = OUTPUT, 50 in / 9 out -> 50 / 9 = 5.556.
     assert r.input_quantity == D("50") and r.shrinkage_qty == D("41")
     assert r.output_quantity == D("9")
-    assert r.rendemen == D("1.0000") and r.yield_percent == D("100.0000")
+    assert r.rendemen == D("5.5556") and r.yield_percent == D("18.0000")
 
 
 def test_non_sortation_event_rejected(session, staff_user, supplier):

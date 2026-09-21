@@ -1696,12 +1696,11 @@ def test_rendemen_sortation_endpoints(client, supplier_id, pic_id):
     assert len(rows) == 1 and rows[0]["event_id"] == event_id
     assert rows[0]["raw_weight"] == "77.740" and rows[0]["complete"] is True
     assert rows[0]["output_quantity"] == "13.555"
-    # Fase 35: penyebut = INPUT sortasi (77,74 masuk, 13,555 keluar tanpa airdrying di
-    # antaranya) -> 77,74 / 77,74 = 1. Basis output lama (5.7352) tidak lagi dipakai.
-    assert rows[0]["rendemen"] == "1.0000" and len(rows[0]["outputs"]) == 2
+    # Fase 35: penyebut tetap OUTPUT sortasi (dikoreksi user): 77,74 / 13,555 = 5.7352.
+    assert rows[0]["rendemen"] == "5.7352" and len(rows[0]["outputs"]) == 2
 
     one = client.get(f"/api/rendemen/sortation/{event_id}")
-    assert one.status_code == 200 and one.json()["rendemen"] == "1.0000"
+    assert one.status_code == 200 and one.json()["rendemen"] == "5.7352"
     assert len(client.get("/api/rendemen/sortation", params={"batch_id": src}).json()) == 1
     assert client.get("/api/rendemen/sortation", params={"batch_id": 999}).json() == []
     assert client.get("/api/rendemen/sortation/9999").status_code == 404

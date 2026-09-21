@@ -704,8 +704,7 @@ class SortationOutputOut(BaseModel):
 
 class SortationRendemenOut(BaseModel):
     """Mirrors services/rendemen.py `SortationRendemen` field-for-field.
-    `rendemen` is the SORT sheet's ratio (kg raw per kg FED INTO the
-    sortation since Fase 35, was per kg output), not a percent; `raw_weight`/`rendemen` are null when lineage is incomplete."""
+    `rendemen` is the SORT sheet's ratio (kg raw per kg sorted output), not a percent; `raw_weight`/`rendemen` are null when lineage is incomplete."""
 
     event_id: int
     event_date: dt.date

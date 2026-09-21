@@ -2,7 +2,7 @@
 `services.rendemen`. Every figure is derived from genealogy on request;
 nothing is stored and no business rule is added at this layer (see
 services/rendemen.py for the decisions: ratio not percent, numerator =
-received net weight, denominator = sortation INPUT since Fase 35).
+received net weight, denominator = sortation OUTPUT total).
 Fase 35 adds per-Mixing rendemen (output / total input sumber)."""
 from __future__ import annotations
 
