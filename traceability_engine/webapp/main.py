@@ -28,6 +28,7 @@ from ..exceptions import (
 )
 from .database import init_db
 from .routers import (
+    aa_chain,
     adjustment,
     batches,
     curing,
@@ -137,6 +138,7 @@ app.include_router(adjustment.router, prefix=api_prefix)
 app.include_router(stock.router, prefix=api_prefix)
 app.include_router(traceability.router, prefix=api_prefix)
 app.include_router(rendemen.router, prefix=api_prefix)
+app.include_router(aa_chain.router, prefix=api_prefix)
 app.include_router(date_order.router, prefix=api_prefix)
 app.include_router(disposition.router, prefix=api_prefix)
 app.include_router(batches.router, prefix=api_prefix)

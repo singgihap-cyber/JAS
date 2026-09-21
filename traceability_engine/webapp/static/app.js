@@ -86,7 +86,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
-        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); }
+        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderAaChain(); }
         if (page === 'stock') renderStockSummary();
         if (page === 'batch-history') { renderRendemenSortation(); renderRendemenMixing(); }
     });
@@ -1596,6 +1596,27 @@ document.getElementById('returnForm').addEventListener('submit', async (e) => {
         await renderDisposition();
     } catch (err) { toastError(err, 6000); }
 });
+
+// ─── AUDIT PERUBAHAN AA RUTE HIJAU (Fase 36, laporan atas Fase 33) ──────
+async function renderAaChain() {
+    const tbody = document.getElementById('aaChainTable');
+    if (!tbody) return;
+    const hijauOnly = document.getElementById('aaChainHijauOnly').checked;
+    let rows;
+    try { rows = await api('GET', '/audit/aa-chain?hijau_only=' + hijauOnly); }
+    catch (err) { toastError(err, 6000); return; }
+    tbody.innerHTML = rows.length ? rows.map(r => `<tr title="${r.message}">
+            <td>${r.event_type} #${r.event_id}</td>
+            <td>${r.event_date}</td>
+            <td class="batch-id">#${r.source_batch_id} ${r.source_batch_number || ''}</td>
+            <td><span class="badge badge-primary">${r.source_jenis_code} ${r.source_jenis_label}</span></td>
+            <td class="batch-id">#${r.result_batch_id} ${r.result_batch_number || ''}</td>
+            <td><span class="badge badge-danger">⚠️ ${r.result_jenis_code} ${r.result_jenis_label}</span></td>
+            <td>${r.hijau_route ? 'Hijau' : 'Lainnya'}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Tidak ada perubahan Jenis (AA) di rute</td></tr>';
+}
+document.getElementById('aaChainHijauOnly').addEventListener('change', renderAaChain);
 
 async function renderAuditLog() {
     const logs = await api('GET', '/audit-logs?entity_type=Batch');

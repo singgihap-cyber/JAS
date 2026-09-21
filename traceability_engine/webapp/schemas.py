@@ -761,6 +761,25 @@ class DateOrderViolationOut(BaseModel):
     message: str
 
 
+# ------------------------------------------- perubahan AA rute (Fase 36)
+class AaChangeFindingOut(BaseModel):
+    """Mirrors services/aa_chain.py `AaChangeFinding` field-for-field."""
+
+    event_id: int
+    event_type: str
+    event_date: dt.date
+    source_batch_id: int
+    source_batch_number: Optional[str] = None
+    source_jenis_code: str
+    source_jenis_label: str
+    result_batch_id: int
+    result_batch_number: Optional[str] = None
+    result_jenis_code: str
+    result_jenis_label: str
+    hijau_route: bool
+    message: str
+
+
 # ------------------------------------------- disposisi REJECTED (Fase 26)
 class SupplierReturnCreate(BaseModel):
     event_date: dt.date

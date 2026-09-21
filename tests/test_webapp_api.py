@@ -1908,3 +1908,23 @@ def test_rendemen_mixing_endpoints(client, supplier_id, pic_id):
     assert client.get("/api/rendemen/mixing/9999").status_code == 404
     # sebuah event non-Mixing (Receiving) bukan Mixing -> 404
     assert client.get("/api/rendemen/mixing/1").status_code == 404
+
+
+def test_aa_chain_audit_endpoint(client, supplier_id, pic_id):
+    """Fase 36: laporan perubahan AA di rute Hijau; kosong bila konsisten."""
+    assert client.get("/api/audit/aa-chain").json() == []
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_HIJAU", "net_quantity": "100.000",
+        "jenis_code": "02", "grade_code": "00"})
+    b = r.json()["batch"]["batch_id"]
+    s = client.post("/api/sortation", json={
+        "event_date": "2026-09-21", "pic_user_id": pic_id, "batch_id": b,
+        "eg_qty": "60.000", "process_code": "00", "eg_batch_number": "0102024-260918-00"})
+    assert s.status_code in (200, 201), s.text
+    rows = client.get("/api/audit/aa-chain").json()
+    assert len(rows) == 1 and rows[0]["hijau_route"] is True
+    assert rows[0]["source_jenis_code"] == "02" and rows[0]["result_jenis_code"] == "01"
+    assert "Jenis seharusnya" in rows[0]["message"]
+    assert client.get("/api/audit/aa-chain", params={"batch_id": 999}).json() == []
+    assert len(client.get("/api/audit/aa-chain", params={"hijau_only": "false"}).json()) == 1

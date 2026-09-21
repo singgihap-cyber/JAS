@@ -856,6 +856,24 @@
             </div>
 
             <div class="section">
+                <div class="section-title">🧬 Audit Perubahan Jenis (AA) di Rute Hijau</div>
+                <div class="info-box">
+                    Jenis (AA) seharusnya tidak berubah sepanjang rute (Fase 33). Tabel ini menampilkan batch hasil
+                    yang AA-nya berbeda dari batch sumber pada event yang sama (Mixing dikecualikan; AA lama 03/04
+                    dilewati). Laporan saja — tidak memblokir; periksa kemungkinan salah input nomor batch.
+                </div>
+                <label style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:13px">
+                    <input type="checkbox" id="aaChainHijauOnly" checked> Hanya rute Hijau
+                </label>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Event</th><th>Tanggal</th><th>Batch Sumber</th><th>AA Sumber</th><th>Batch Hasil</th><th>AA Hasil</th><th>Rute</th></tr></thead>
+                        <tbody id="aaChainTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
                 <div class="section-title">🔄 Tandai Batch SUPERSEDED</div>
                 <div class="info-box">
                     Untuk batch yang sudah di-relabel jadi nomor batch baru (mis. Downgrade/Upgrade via Sortasi,
