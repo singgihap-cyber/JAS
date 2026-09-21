@@ -121,13 +121,37 @@ def test_qc_via_service_default_blocks_backdated(session, staff_user, supplier):
 
 
 
-def test_legacy_batch_is_exempt_but_still_audited(session, staff_user, supplier):
-    """Keputusan user 2026-09-19: batch lama 030218-260618-00 (terlanjur salah
-    sejak awal) konsisten sampai keluar; batch lain tetap diblokir."""
+def test_exemption_list_is_empty_since_phase_37():
+    """Fase 37: batch 030218-260618-00 sudah keluar, pengecualiannya dihapus."""
     from traceability_engine.services.date_order import (
         LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS as EX,
     )
-    assert "030218-260618-00" in EX
+    assert EX == frozenset()
+
+
+def test_former_legacy_batch_is_now_blocked_and_audited(session, staff_user, supplier):
+    """Setelah Fase 37 batch 030218-260618-00 diperlakukan seperti batch lain:
+    diblokir untuk event baru berlabel tanggal mundur, dan pelanggaran tersimpan
+    (kalau ada) muncul di audit dengan exempt=False."""
+    uid = staff_user.user_id
+    ev = record_receiving(session, ReceivingInput(
+        event_date=D18, pic_user_id=uid, supplier_id=supplier.supplier_id,
+        batch_type=BatchType.RAW_HIJAU, net_quantity=D("10"),
+        batch_number="030218-260618-00"))
+    b = session.query(Batch).filter_by(created_from_event_id=ev.event_id).one()
+    with pytest.raises(EventDateOrderError):
+        _selfloop(session, uid, b, dt.date(2026, 6, 15))
+    [c] = check_event_date_order(session, dt.date(2026, 6, 10), [b.batch_id])
+    assert c.exempt is False
+
+
+def test_exemption_mechanism_still_works(session, staff_user, supplier, monkeypatch):
+    """Mekanisme pengecualian dipertahankan untuk kasus lama serupa: nomor yang
+    didaftarkan lolos dan tetap tampil di audit (exempt=True); batch lain diblokir."""
+    from traceability_engine.services import date_order
+    monkeypatch.setattr(
+        date_order, "LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS",
+        frozenset({"030218-260618-00"}))
     uid = staff_user.user_id
     ev = record_receiving(session, ReceivingInput(
         event_date=D18, pic_user_id=uid, supplier_id=supplier.supplier_id,

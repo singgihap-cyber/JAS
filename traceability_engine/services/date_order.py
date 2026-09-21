@@ -20,12 +20,13 @@ riwayat yang memang terbalik ada jalur keluar eksplisit.
 - `record_process_event(..., strict_date_order=True)` -- DEFAULT: menolak event
   dengan `EventDateOrderError`; `strict_date_order=False` = opt-out.
 
-Pengecualian batch lama (keputusan user 2026-09-19): batch yang SUDAH terlanjur
-dicatat salah sejak awal tetap dikecualikan agar datanya konsisten sampai batch
-itu keluar (`LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS`). Batch baru TIDAK BOLEH
-terlanjur lagi -- tanpa pengecualian. Batch yang dikecualikan tetap muncul di
-audit dengan `exempt=True` (catatan, bukan blokir). Hapus nomor dari daftar
-begitu batch itu sudah keluar.
+Pengecualian batch lama (keputusan user 2026-09-19, Fase 28): batch yang SUDAH
+terlanjur dicatat salah sejak awal boleh dikecualikan sampai batch itu keluar
+(`LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS`). Batch baru TIDAK BOLEH terlanjur
+lagi -- tanpa pengecualian. Batch yang dikecualikan tetap muncul di audit dengan
+`exempt=True` (catatan, bukan blokir). Fase 37: batch `030218-260618-00` sudah
+keluar, jadi daftar dikosongkan; mekanismenya dipertahankan untuk kasus serupa.
+Hapus nomor dari daftar begitu batch itu sudah keluar.
 
 Tanpa skema baru; semuanya diturunkan dari ProcessEvent + EventBatchLink.
 """
@@ -42,9 +43,10 @@ from ..exceptions import EventDateOrderError
 from ..models import Batch, EventBatchLink, ProcessEvent
 
 
-# Batch lama yang terlanjur salah sejak awal: MD 15/6 dicatat sebelum sortasi
-# (tercatat 18/6 = tanggal selesai). Konsisten sampai batch keluar, lalu hapus.
-LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS: frozenset[str] = frozenset({"030218-260618-00"})
+# Kosong sejak Fase 37 (batch 030218-260618-00 -- MD 15/6 dicatat sebelum sortasi
+# 18/6 -- sudah keluar, pengecualiannya dihapus). Isi lagi hanya atas keputusan
+# user untuk batch lama lain yang terlanjur salah sejak awal.
+LEGACY_DATE_ORDER_EXEMPT_BATCH_NUMBERS: frozenset[str] = frozenset()
 
 
 @dataclass
