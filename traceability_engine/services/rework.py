@@ -88,7 +88,10 @@ Decisions made in this phase, and why:
    ...}`), the same treatment as Mixing's `DESKRIPSI PRODUK`
    (`mixing.py` #8) -- a free-text descriptive field with no dedicated
    schema column.
-9. **`BATCH NUMBER SETELAH REWORK` (the new batch number(s)) is not settable
+9. **(Fase 32) Nomor batch hasil bisa dibuat otomatis** dengan
+   `ReworkInput.auto_batch_number=True` (`services/batch_numbering.py`,
+   `claude/32_GENERATOR_TURUNAN.md`). Tanpa flag itu perilaku lama berlaku:
+   **`BATCH NUMBER SETELAH REWORK` (the new batch number(s)) is not settable
    here.** Batch-number *generation* remains blocked on the AA/Jenis segment
    (`BATCH_NUMBER_SPEC.md`), same situation as every prior phase --
    `NewBatchSpec.batch_number` is left `None` and assigned later once the
@@ -106,6 +109,7 @@ from sqlalchemy.orm import Session
 
 from ..enums import BatchType, EventType
 from ..models import Batch, ProcessEvent
+from .batch_numbering import derive_number, output_for_number
 from .events import InputSpec, NewBatchSpec, OutputSpec, record_process_event
 from .sortation import GRADE_EG, GRADE_EP, GRADE_GOURMET, GRADE_NC
 
@@ -160,6 +164,9 @@ class ReworkInput:
     eg_batch_type: Optional[BatchType] = None
     ep_batch_type: Optional[BatchType] = None
     nc_batch_type: Optional[BatchType] = None
+    # Fase 32 -- nomor otomatis PP=04 (services/batch_numbering.py).
+    auto_batch_number: bool = False
+    jenis_code: Optional[str] = None  # opsional: ganti AA batch sumber (01/02)
 
 
 def _rework_notes(data: ReworkInput) -> Optional[str]:
@@ -193,22 +200,27 @@ def record_rework(session: Session, data: ReworkInput) -> ProcessEvent:
         if qty == 0:
             continue
         batch_type = getattr(data, _OVERRIDE_ATTR[attr]) or default_batch_type
-        outputs.append(
-            OutputSpec(
-                quantity=qty,
-                unit=data.unit,
-                new_batch=NewBatchSpec(
-                    batch_type=batch_type,
-                    grade_code=grade_code,
-                    jenis_code=source.jenis_code,  # inherited -- see #4
-                    supplier_id=source.supplier_id,
-                    supplier_code=source.supplier_code,
-                    receiving_date=source.receiving_date,
-                    process_code=PROCESS_CODE_REWORK,  # hardcoded -- see #5
-                    unit=data.unit,
-                ),
-            )
+        spec = NewBatchSpec(
+            batch_type=batch_type,
+            grade_code=grade_code,
+            jenis_code=source.jenis_code,  # inherited -- see #4
+            supplier_id=source.supplier_id,
+            supplier_code=source.supplier_code,
+            receiving_date=source.receiving_date,
+            process_code=PROCESS_CODE_REWORK,  # hardcoded -- see #5
+            unit=data.unit,
         )
+        if data.auto_batch_number:
+            number = derive_number(
+                source, grade_code=grade_code, process_code=PROCESS_CODE_REWORK,
+                jenis_code=data.jenis_code,
+            )
+            outputs.append(output_for_number(
+                session, number=number, quantity=qty, unit=data.unit, spec=spec,
+                event_type=EventType.REWORK, exclude_ids=[source.batch_id],
+            ))
+        else:
+            outputs.append(OutputSpec(quantity=qty, unit=data.unit, new_batch=spec))
 
     if not outputs:
         raise ValueError(

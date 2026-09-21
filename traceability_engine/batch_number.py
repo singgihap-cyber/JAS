@@ -116,10 +116,10 @@ def parse(batch_number: str) -> BatchNumberComponents:
     )
 
 
-# Fase 31 -- generator dibuka (keputusan user 2026-09-21): hanya untuk batch
-# baru dari Receiving (PP=00). PP lain (Mixing 03, Upgrade 01, Downgrade 02,
-# Rework 04) tetap ketikan staf sampai user memutuskan aturannya.
-GENERATABLE_PROCESS_CODES = ("00",)
+# Fase 31 -- generator dibuka untuk Receiving (PP=00). Fase 32 (keputusan user
+# 2026-09-21) -- dibuka untuk PP 01 Upgrade, 02 Downgrade, 03 Mixing, 04 Rework;
+# aturan turunan (tanggal/supplier/AA) ada di services/batch_numbering.py.
+GENERATABLE_PROCESS_CODES = tuple(PROCESS_CODES)
 
 
 def generate(
@@ -129,6 +129,7 @@ def generate(
     supplier_code: str,
     receiving_date: dt.date,
     process_code: str = "00",
+    allow_legacy_jenis: bool = False,
 ) -> str:
     """Rakit nomor batch BARU: [AA][BB][CCC]-[YYMMDD]-[PP] (supplier 3 digit).
 
@@ -136,10 +137,15 @@ def generate(
     - `grade_code` = BB (Grade Master / 10): 00-06. Semua diterima apa adanya
       (keputusan user: keraguan Grade 04/06 tidak memblokir).
     - `supplier_code` numerik 1-3 digit, di-zero-pad ke 3 digit (`24` -> `024`).
-    - `process_code` hanya `00` (Original) pada Fase 31.
+    - `process_code` 00-04 (Fase 32: 01 Upgrade, 02 Downgrade, 03 Mixing,
+      04 Rework ikut dibuka).
+    - `allow_legacy_jenis=True` (Fase 32) hanya untuk batch TURUNAN yang
+      membawa AA lama 03/04 dari batch sumber; batch Receiving tetap 01/02.
     Raises ValueError bila ada masukan tak valid.
     """
-    if jenis_code not in JENIS_CODES:
+    if jenis_code not in JENIS_CODES and not (
+        allow_legacy_jenis and jenis_code in LEGACY_JENIS_CODES
+    ):
         raise ValueError(
             f"Jenis {jenis_code!r} tidak valid untuk batch baru (hanya "
             f"{', '.join(f'{k}={v}' for k, v in JENIS_CODES.items())}; 03/04 = legacy)."
@@ -155,7 +161,7 @@ def generate(
     if process_code not in GENERATABLE_PROCESS_CODES:
         raise ValueError(
             f"Kode proses {process_code!r} belum bisa dibuat otomatis "
-            f"(Fase 31: hanya {', '.join(GENERATABLE_PROCESS_CODES)})."
+            f"(hanya {', '.join(GENERATABLE_PROCESS_CODES)})."
         )
     if not 2000 <= receiving_date.year <= 2099:
         raise ValueError(f"Tanggal {receiving_date} di luar rentang 2000-2099.")

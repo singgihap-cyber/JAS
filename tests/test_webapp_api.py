@@ -1775,3 +1775,47 @@ def test_batch_number_preview_and_generated_receiving_merge(client, supplier_id,
     bad = client.get("/api/batch-number/preview", params={**q, "jenis_code": "03"}).json()
     assert bad["ok"] is False
     assert client.post("/api/receiving", json={**body, "jenis_code": "03"}).status_code == 422
+
+
+def test_derived_batch_number_api_fase32(client, supplier_id, pic_id):
+    """Fase 32: preview-derived + Sortasi/Rework/Mixing otomatis via API."""
+    def recv(grade, date="2026-09-01"):
+        r = client.post("/api/receiving", json={
+            "event_date": date, "pic_user_id": pic_id, "supplier_id": supplier_id,
+            "batch_type": "RAW_KERING", "net_quantity": 100, "jenis_code": "02", "grade_code": grade})
+        assert r.status_code == 201, r.text
+        return r.json()["batch"]["batch_id"]
+
+    a, b = recv("01"), recv("02")
+    pv = client.get("/api/batch-number/preview-derived", params={
+        "process_code": "02", "grade_code": "02", "source_batch_id": a}).json()
+    assert pv == {"ok": True, "batch_number": "0202024-260901-02", "will_merge": False, "existing_batch_id": None}
+
+    r = client.post("/api/sortation", json={
+        "event_date": "2026-09-21", "pic_user_id": pic_id, "batch_id": a, "initial_qty": 10,
+        "eg_qty": 10, "process_code": "02", "auto_batch_number": True})
+    assert r.status_code == 201, r.text
+    assert r.json()["batches"][0]["batch_number"] == "0202024-260901-02"
+    assert client.get("/api/batch-number/preview-derived", params={
+        "process_code": "02", "grade_code": "02", "source_batch_id": a}).json()["will_merge"] is True
+
+    r = client.post("/api/rework", json={
+        "event_date": "2026-09-21", "pic_user_id": pic_id, "batch_id": b, "starting_qty": 5,
+        "gourmet_qty": 5, "auto_batch_number": True})
+    assert r.status_code == 201, r.text
+    assert r.json()["batches"][0]["batch_number"] == "0201024-260901-04"
+
+    r = client.post("/api/mixing", json={
+        "event_date": "2026-09-21", "pic_user_id": pic_id, "final_qty": 30,
+        "sources": [{"batch_id": a, "quantity": 20}, {"batch_id": b, "quantity": 10}],
+        "product_description": "GOURMET", "jenis_code": "02", "grade_code": "01",
+        "auto_batch_number": True})
+    assert r.status_code == 201, r.text
+    assert r.json()["batch"]["batch_number"] == "0201000-260921-03"
+
+    bad = client.get("/api/batch-number/preview-derived", params={
+        "process_code": "00", "grade_code": "01", "source_batch_id": a}).json()
+    assert bad["ok"] is False
+    assert client.post("/api/sortation", json={
+        "event_date": "2026-09-21", "pic_user_id": pic_id, "batch_id": b, "initial_qty": 1,
+        "eg_qty": 1, "process_code": "00", "auto_batch_number": True}).status_code == 422

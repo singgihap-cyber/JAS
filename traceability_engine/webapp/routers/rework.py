@@ -35,6 +35,8 @@ def create_rework(payload: ReworkCreate, db: Session = Depends(get_db)):
         eg_qty=payload.eg_qty,
         ep_qty=payload.ep_qty,
         nc_qty=payload.nc_qty,
+        auto_batch_number=payload.auto_batch_number,
+        jenis_code=payload.jenis_code,
     )
     event = record_rework(db, data)
     db.flush()

@@ -131,6 +131,7 @@ from sqlalchemy.orm import Session
 
 from ..enums import BatchType, EventType
 from ..models import ProcessEvent
+from .batch_numbering import mixing_number, output_for_number
 from .events import InputSpec, NewBatchSpec, OutputSpec, record_process_event
 
 ZERO = Decimal("0")
@@ -165,6 +166,9 @@ class MixingInput:
     supplier_id: Optional[int] = None  # default: unattributable -- see #5
     supplier_code: str = MIXED_SUPPLIER_CODE  # see #5
     batch_type: BatchType = BatchType.PROCESSED  # see #7
+    # Fase 32 -- nomor otomatis PP=03 (services/batch_numbering.py): wajib
+    # `jenis_code` (01/02) dan `grade_code` (BB); tanggal nomor = event_date.
+    auto_batch_number: bool = False
 
 
 def _mix_notes(data: MixingInput, cp_qty: Decimal) -> str:
@@ -210,19 +214,34 @@ def record_mixing(session: Session, data: MixingInput) -> ProcessEvent:
         for s in data.sources
     ]
 
-    output = OutputSpec(
-        quantity=data.final_qty,
+    spec = NewBatchSpec(
+        batch_type=data.batch_type,
+        grade_code=data.grade_code,
+        jenis_code=data.jenis_code,
+        supplier_id=data.supplier_id,
+        supplier_code=data.supplier_code,
+        process_code=PROCESS_CODE_MIXING,
         unit=data.unit,
-        new_batch=NewBatchSpec(
-            batch_type=data.batch_type,
-            grade_code=data.grade_code,
-            jenis_code=data.jenis_code,
-            supplier_id=data.supplier_id,
-            supplier_code=data.supplier_code,
-            process_code=PROCESS_CODE_MIXING,
-            unit=data.unit,
-        ),
     )
+    if data.auto_batch_number:
+        if not data.jenis_code or not data.grade_code:
+            raise ValueError(
+                "Nomor batch otomatis Mixing memerlukan Jenis (AA) dan Grade (BB)."
+            )
+        number = mixing_number(
+            session,
+            source_batch_ids=batch_ids,
+            jenis_code=data.jenis_code,
+            grade_code=data.grade_code,
+            event_date=data.event_date,
+            supplier_code=data.supplier_code,
+        )
+        output = output_for_number(
+            session, number=number, quantity=data.final_qty, unit=data.unit, spec=spec,
+            event_type=EventType.MIXING, exclude_ids=batch_ids,
+        )
+    else:
+        output = OutputSpec(quantity=data.final_qty, unit=data.unit, new_batch=spec)
 
     return record_process_event(
         session,

@@ -119,6 +119,60 @@ def preview_batch_number(
     }
 
 
+@router.get("/batch-number/preview-derived")
+def preview_derived_batch_number(
+    process_code: str = Query(...),
+    grade_code: str = Query(...),
+    source_batch_id: Optional[int] = Query(None),
+    source_batch_ids: Optional[str] = Query(None, description="Mixing: id dipisah koma"),
+    jenis_code: Optional[str] = Query(None),
+    event_date: Optional[dt.date] = Query(None),
+    batch_type: str = Query("PROCESSED"),
+    db: Session = Depends(get_db),
+):
+    """Fase 32: pratinjau nomor batch turunan. PP 01/02/04 memakai
+    `source_batch_id`; PP 03 (Mixing) memakai `source_batch_ids`, `jenis_code`,
+    `event_date`. Tidak menyimpan apa pun; input tak valid -> ok=False."""
+    from ...enums import BatchType, EventType
+    from ...models import Batch
+    from ...services.batch_numbering import (
+        derive_number, find_mergeable_batch, mixing_number,
+    )
+
+    try:
+        if process_code == "03":
+            ids = [int(x) for x in (source_batch_ids or "").split(",") if x.strip()]
+            if len(ids) < 2 or not jenis_code or event_date is None:
+                raise ValueError("Mixing: isi >=2 batch sumber, Jenis, dan tanggal.")
+            number = mixing_number(
+                db, source_batch_ids=ids, jenis_code=jenis_code,
+                grade_code=grade_code, event_date=event_date,
+            )
+            event_type, exclude = EventType.MIXING, ids
+        else:
+            source = db.get(Batch, source_batch_id) if source_batch_id else None
+            if source is None:
+                raise ValueError("Batch sumber tidak ditemukan.")
+            number = derive_number(
+                source, grade_code=grade_code, process_code=process_code,
+                jenis_code=jenis_code,
+            )
+            event_type = EventType.REWORK if process_code == "04" else EventType.SORTATION
+            exclude = [source.batch_id]
+        existing = find_mergeable_batch(
+            db, number, batch_type=BatchType(batch_type), event_type=event_type,
+            exclude_ids=exclude,
+        )
+    except (ValueError, TraceabilityError) as exc:
+        return {"ok": False, "reason": str(exc)}
+    return {
+        "ok": True,
+        "batch_number": number,
+        "will_merge": existing is not None,
+        "existing_batch_id": existing.batch_id if existing else None,
+    }
+
+
 @router.get("/batch-number/parse")
 def parse_batch_number(value: str = Query(..., min_length=1)):
     """Best-effort decode of a manually-typed batch number, for the

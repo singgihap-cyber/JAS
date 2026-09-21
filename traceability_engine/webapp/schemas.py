@@ -358,6 +358,9 @@ class SortationCreate(BaseModel):
     ep_batch_number: Optional[str] = None
     nc_batch_number: Optional[str] = None
     powder_batch_number: Optional[str] = None
+    # Fase 32 -- nomor otomatis PP 01/02 (services/batch_numbering.py)
+    auto_batch_number: bool = False
+    jenis_code: Optional[str] = None
 
 
 class SortationResult(BaseModel):
@@ -384,6 +387,7 @@ class MixingCreate(BaseModel):
     supplier_id: Optional[int] = None  # default: unattributable -- mixing.py #5
     supplier_code: str = "000"  # see mixing.py #5
     batch_type: Literal["RAW_KERING", "RAW_HIJAU", "PROCESSED", "POWDER", "PACKAGED"] = "PROCESSED"
+    auto_batch_number: bool = False  # Fase 32 -- wajib jenis_code + grade_code
 
 
 class MixingResult(BaseModel):
@@ -446,6 +450,8 @@ class ReworkCreate(BaseModel):
     eg_qty: Optional[Decimal] = None
     ep_qty: Optional[Decimal] = None
     nc_qty: Optional[Decimal] = None  # "Non Conform" -- sortation.py #2
+    auto_batch_number: bool = False  # Fase 32 -- PP=04 otomatis
+    jenis_code: Optional[str] = None
 
 
 class ReworkResult(BaseModel):

@@ -42,6 +42,8 @@ def create_sortation(payload: SortationCreate, db: Session = Depends(get_db)):
         ep_batch_number=payload.ep_batch_number,
         nc_batch_number=payload.nc_batch_number,
         powder_batch_number=payload.powder_batch_number,
+        auto_batch_number=payload.auto_batch_number,
+        jenis_code=payload.jenis_code,
     )
     event = record_sortation(db, data)
     db.flush()

@@ -60,7 +60,7 @@ def test_generate_roundtrips_through_parse():
     {"jenis_code": "03"}, {"jenis_code": "04"}, {"jenis_code": "1"},
     {"grade_code": "07"}, {"grade_code": "10"},
     {"supplier_code": "1234"}, {"supplier_code": "ab"},
-    {"process_code": "03"}, {"process_code": "01"},
+    {"process_code": "05"}, {"process_code": "0"},
 ])
 def test_generate_rejects_invalid(kw):
     with pytest.raises(ValueError):
@@ -99,3 +99,16 @@ def test_jenis_unknown_code_parses_without_label():
 def test_hijau_is_grade_not_jenis():
     assert "00" not in batch_number.JENIS_CODES
     assert batch_number.BB_TO_GRADE_MASTER["00"] == 0
+
+
+def test_generate_accepts_derived_process_codes_fase32():
+    for pp in ("01", "02", "03", "04"):
+        assert _gen(process_code=pp).endswith(f"-{pp}")
+
+
+def test_generate_legacy_jenis_only_when_allowed():
+    with pytest.raises(ValueError):
+        _gen(jenis_code="03")
+    assert _gen(jenis_code="03", allow_legacy_jenis=True).startswith("03")
+    with pytest.raises(ValueError):
+        _gen(jenis_code="05", allow_legacy_jenis=True)

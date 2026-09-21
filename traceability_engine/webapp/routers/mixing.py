@@ -36,6 +36,7 @@ def create_mixing(payload: MixingCreate, db: Session = Depends(get_db)):
         supplier_id=payload.supplier_id,
         supplier_code=payload.supplier_code,
         batch_type=BatchType(payload.batch_type),
+        auto_batch_number=payload.auto_batch_number,
     )
     event = record_mixing(db, data)
     db.flush()

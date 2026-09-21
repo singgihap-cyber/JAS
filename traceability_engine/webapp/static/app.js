@@ -538,7 +538,16 @@ const STAGE_DEFS = [
                 options: [{ value: '00', label: '00 — Original' }, { value: '01', label: '01 — Upgrade' }, { value: '02', label: '02 — Downgrade' }],
             },
             { id: 'end_date', label: 'Tanggal Selesai (tanggal di nomor batch)', type: 'date' },
+            {
+                id: 'auto_batch_number', label: 'Nomor batch hasil — hanya Upgrade/Downgrade (PP 01/02); nomor ketikan di atas tetap dipakai', type: 'select',
+                options: [{ value: 'true', label: 'Buat otomatis (tanggal & supplier dari batch sumber)' }],
+            },
+            {
+                id: 'jenis_code', label: 'Jenis hasil (opsional, ganti Jenis batch sumber)', type: 'select',
+                options: [{ value: '01', label: '01 — Tahitensis' }, { value: '02', label: '02 — Planifolia' }],
+            },
         ],
+        derivedPreview: true,
         historyCols: ['shrinkage_qty', 'outputs'],
     },
     {
@@ -577,7 +586,16 @@ const STAGE_DEFS = [
             { id: 'ep_qty', label: 'EP (kg)', type: 'number', step: '0.001' },
             { id: 'nc_qty', label: 'NC / Non Conform (kg)', type: 'number', step: '0.001' },
             { id: 'process_description', label: 'Keterangan Proses', type: 'text' },
+            {
+                id: 'auto_batch_number', label: 'Nomor batch hasil (PP 04)', type: 'select',
+                options: [{ value: 'true', label: 'Buat otomatis (tanggal & supplier dari batch sumber)' }],
+            },
+            {
+                id: 'jenis_code', label: 'Jenis hasil (opsional, ganti Jenis batch sumber)', type: 'select',
+                options: [{ value: '01', label: '01 — Tahitensis' }, { value: '02', label: '02 — Planifolia' }],
+            },
         ],
+        derivedPreview: true,
         historyCols: ['shrinkage_qty', 'outputs'],
     },
 ];
@@ -637,9 +655,46 @@ function renderProsesFields() {
                     placeholder="${f.placeholder || ''}"${f.required ? ' required' : ''}>`;
             }
             return `<div class="form-group"><label class="form-label">${f.label}${req}</label>${input}</div>`;
-        }).join('');
+        }).join('') + (def.derivedPreview ? '<div class="info-box" id="pDerivedPreview">&nbsp;</div>' : '');
     renderProsesHistory();
+    refreshDerivedPreview();
 }
+
+// Fase 32: pratinjau nomor batch turunan (Sortasi PP 01/02, Rework PP 04)
+let derivedPreviewTimer = null;
+function refreshDerivedPreview() {
+    clearTimeout(derivedPreviewTimer);
+    const box = document.getElementById('pDerivedPreview');
+    if (!box) return;
+    const def = stageByKey(document.getElementById('pTahap').value);
+    const auto = document.getElementById('pf_auto_batch_number');
+    if (!def || !auto || auto.value !== 'true') { box.textContent = ' '; return; }
+    const batchId = document.getElementById('pBatch').value;
+    const pcEl = document.getElementById('pf_process_code');
+    const pp = def.key === 'rework' ? '04' : (pcEl ? pcEl.value : '');
+    if (!batchId) { box.textContent = 'Pilih batch sumber.'; return; }
+    if (!['01', '02', '04'].includes(pp)) { box.textContent = 'Nomor otomatis hanya untuk Upgrade (01) / Downgrade (02) / Rework.'; return; }
+    const slots = [['gourmet_qty', '01', 'Gourmet'], ['eg_qty', '02', 'EG'], ['ep_qty', '03', 'EP'], ['nc_qty', '04', 'NC'], ['powder_qty', '05', 'Powder']];
+    const filled = slots.filter(([id]) => { const el = document.getElementById('pf_' + id); return el && Number(el.value) > 0; });
+    if (!filled.length) { box.textContent = 'Isi qty grade hasil.'; return; }
+    derivedPreviewTimer = setTimeout(async () => {
+        const jenis = (document.getElementById('pf_jenis_code') || {}).value || '';
+        const lines = [];
+        for (const [id, grade, label] of filled) {
+            try {
+                const q = new URLSearchParams({ process_code: pp, grade_code: grade, source_batch_id: batchId, batch_type: id === 'powder_qty' ? 'POWDER' : 'PROCESSED' });
+                if (jenis) q.set('jenis_code', jenis);
+                const r = await api('GET', '/batch-number/preview-derived?' + q.toString());
+                lines.push(r.ok
+                    ? `${label}: <code>${r.batch_number}</code>` + (r.will_merge ? ` — sudah ada (batch #${r.existing_batch_id}); stok DITAMBAHKAN` : ' — batch baru')
+                    : `${label}: ⚠️ ${r.reason}`);
+            } catch (err) { lines.push(`${label}: –`); }
+        }
+        box.innerHTML = lines.join('<br>');
+    }, 300);
+}
+document.getElementById('prosesFields').addEventListener('input', refreshDerivedPreview);
+document.getElementById('prosesFields').addEventListener('change', refreshDerivedPreview);
 
 async function renderProsesHistory() {
     const def = stageByKey(document.getElementById('pTahap').value);
@@ -775,6 +830,34 @@ function refreshMixSourceOptions() {
     });
 }
 
+// Fase 32: pratinjau nomor batch Mixing (PP 03)
+let mixPreviewTimer = null;
+function refreshMixPreview() {
+    clearTimeout(mixPreviewTimer);
+    const box = document.getElementById('mAutoPreview');
+    if (!document.getElementById('mAuto').checked) { box.textContent = ' '; return; }
+    const ids = [...document.querySelectorAll('#mixSources .mix-src-batch')].map(e => e.value).filter(Boolean);
+    const jenis = document.getElementById('mJenis').value.trim();
+    const grade = document.getElementById('mGrade').value.trim();
+    const tgl = document.getElementById('mTanggal').value;
+    if (ids.length < 2 || !jenis || !grade || !tgl) { box.textContent = 'Lengkapi >=2 batch sumber, Jenis, Grade, dan Tanggal.'; return; }
+    mixPreviewTimer = setTimeout(async () => {
+        try {
+            const q = new URLSearchParams({ process_code: '03', grade_code: grade, jenis_code: jenis, event_date: tgl, source_batch_ids: ids.join(',') });
+            const r = await api('GET', '/batch-number/preview-derived?' + q.toString());
+            box.innerHTML = r.ok
+                ? `Nomor batch: <code>${r.batch_number}</code>` + (r.will_merge ? ` — sudah ada (batch #${r.existing_batch_id}); hasil DITAMBAHKAN ke batch itu.` : ' — batch baru.')
+                : '⚠️ ' + r.reason;
+        } catch (err) { box.textContent = ''; }
+    }, 300);
+}
+['mAuto', 'mJenis', 'mGrade', 'mTanggal'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('change', refreshMixPreview);
+    el.addEventListener('input', refreshMixPreview);
+});
+document.getElementById('mixSources').addEventListener('change', refreshMixPreview);
+
 document.getElementById('mixAddSource').addEventListener('click', addMixSourceRow);
 document.getElementById('mixingForm').addEventListener('reset', () => setTimeout(initMixSources, 0));
 document.getElementById('mTanggal').value = todayStr();
@@ -812,6 +895,7 @@ document.getElementById('mixingForm').addEventListener('submit', async (e) => {
     if (jenis) payload.jenis_code = jenis;
     const supplierId = document.getElementById('mSupplier').value;
     if (supplierId) payload.supplier_id = Number(supplierId);
+    if (document.getElementById('mAuto').checked) payload.auto_batch_number = true;
 
     try {
         const result = await api('POST', '/mixing', payload);

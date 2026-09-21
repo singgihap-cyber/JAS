@@ -76,8 +76,9 @@ ambiguity instead of guessing):
    on the new `Batch` and, when it parses, its AA/BB/CC/date/PP components
    replace the inherited ones (#4) -- real example: green `040018-260505-00`
    sorted on 2026-06-18 yields EG `030218-260618-00` (AA `04`->`03`, date
-   segment = sort date). No batch-number *generation* is implemented
-   (batch_number.py still blocks it); staff type the number. The grade
+   segment = sort date). Fase 32: PP 01/02 kini bisa dibuat otomatis
+   (`auto_batch_number=True`, services/batch_numbering.py); PP 00 tetap
+   ketikan staf, dan nomor ketikan selalu menang. The grade
    segment of a typed number is not cross-checked against its slot: the
    spec's own `030442-251113-02` shows staff labelling that differs from
    the BB code, and rule 11 forbids inventing a rejection rule.
@@ -121,6 +122,7 @@ from sqlalchemy.orm import Session
 from .. import batch_number as batch_number_mod
 from ..enums import BatchType, EventType
 from ..models import Batch, ProcessEvent
+from .batch_numbering import derive_number, output_for_number
 from .events import InputSpec, NewBatchSpec, OutputSpec, record_process_event
 
 ZERO = Decimal("0")
@@ -182,6 +184,11 @@ class SortationInput:
     ep_batch_number: Optional[str] = None
     nc_batch_number: Optional[str] = None
     powder_batch_number: Optional[str] = None
+    # Fase 32 -- nomor otomatis untuk hasil Upgrade/Downgrade (PP 01/02), lihat
+    # services/batch_numbering.py. Nomor ketikan staf per grade tetap menang.
+    # `jenis_code` (01/02) opsional: mengganti AA batch sumber (mis. AA lama).
+    auto_batch_number: bool = False
+    jenis_code: Optional[str] = None
 
 
 def _sort_notes(data: SortationInput) -> Optional[str]:
@@ -267,13 +274,19 @@ def record_sortation(session: Session, data: SortationInput) -> ProcessEvent:
         if qty == 0:
             continue
         batch_type = getattr(data, _OVERRIDE_ATTR[attr]) or default_batch_type
-        outputs.append(
-            OutputSpec(
-                quantity=qty,
-                unit=data.unit,
-                new_batch=_new_batch_spec(source, data, attr, grade_code, batch_type),
+        spec = _new_batch_spec(source, data, attr, grade_code, batch_type)
+        if data.auto_batch_number and not spec.batch_number:
+            # Fase 32 -- PP 01/02 dibuat otomatis; nomor ketikan staf menang.
+            number = derive_number(
+                source, grade_code=grade_code, process_code=data.process_code,
+                jenis_code=data.jenis_code,
             )
-        )
+            outputs.append(output_for_number(
+                session, number=number, quantity=qty, unit=data.unit, spec=spec,
+                event_type=EventType.SORTATION, exclude_ids=[source.batch_id],
+            ))
+            continue
+        outputs.append(OutputSpec(quantity=qty, unit=data.unit, new_batch=spec))
 
     if not outputs:
         raise ValueError(
