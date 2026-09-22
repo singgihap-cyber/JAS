@@ -385,3 +385,31 @@ class EventCancellation(Base):
     reason: Mapped[str] = mapped_column(Text)
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     cancelled_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class EventQuantityCorrection(Base):
+    """Fase 45 -- riwayat koreksi kuantitas pada SATU `EventBatchLink`
+    (INPUT atau OUTPUT) sebuah event historis (Production Manager, alasan
+    wajib). Sama syarat kelayakan dengan koreksi tanggal/pembatalan Fase 44
+    (hanya event TANPA event/batch turunan setelahnya pada batch yang
+    disentuhnya -- `services/event_correction.py` `_guard_correctable`).
+    Koreksi OTOMATIS menyesuaikan `StockTransaction` (baris kompensasi
+    delta, bukan edit/hapus baris lama) dan `Batch.current_quantity` --
+    lihat `correct_event_quantity()`. Berlaku generik untuk semua tipe
+    event (keputusan user 2026-09-22); TIDAK menegakkan ulang validasi
+    rekonsiliasi SUM(input)=SUM(output)+susut+loss lintas link lain event
+    yang sama -- di luar lingkup fase ini (lihat docstring
+    `correct_event_quantity`)."""
+
+    __tablename__ = "event_quantity_corrections"
+
+    correction_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
+    link_id: Mapped[int] = mapped_column(ForeignKey("event_batch_links.link_id"))
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"))
+    role: Mapped[str] = mapped_column(String(10))  # INPUT | OUTPUT
+    old_quantity: Mapped[Decimal] = mapped_column(QTY)
+    new_quantity: Mapped[Decimal] = mapped_column(QTY)
+    reason: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())

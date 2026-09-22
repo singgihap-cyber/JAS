@@ -116,7 +116,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic', 'eqPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -1898,6 +1898,8 @@ async function renderEventCorrection() {
     if (dsel) dsel.innerHTML = optHtml;
     const csel = document.getElementById('ecCancelEvent');
     if (csel) csel.innerHTML = optHtml;
+    const qsel = document.getElementById('eqEvent');
+    if (qsel) { qsel.innerHTML = optHtml; await renderEventQuantityLinks(); }
 }
 document.getElementById('ecRefreshBtn').addEventListener('click', renderEventCorrection);
 document.getElementById('ecBatch').addEventListener('change', renderEventCorrection);
@@ -1931,6 +1933,74 @@ document.getElementById('ecCancelForm').addEventListener('submit', async (e) => 
         await renderEventCorrection(); await renderAuditLog();
     } catch (err) { toastError(err, 6000); }
 });
+// ─── KOREKSI KUANTITAS EVENT HISTORIS (Fase 45) ─────────────────────────
+async function renderEventQuantityLinks() {
+    const eventId = document.getElementById('eqEvent').value;
+    const lsel = document.getElementById('eqLink');
+    if (!lsel) return;
+    if (!eventId) { lsel.innerHTML = ''; return; }
+    let links;
+    try { links = await api('GET', `/events/${eventId}/links`); }
+    catch (err) { toastError(err, 6000); return; }
+    lsel.innerHTML = links.map(l =>
+        `<option value="${l.link_id}" data-qty="${l.quantity}">${l.role} — batch #${l.batch_id}${l.batch_number ? ' ' + l.batch_number : ''} (saat ini: ${fmtQty(l.quantity)} ${l.unit})</option>`
+    ).join('');
+}
+document.getElementById('eqEvent').addEventListener('change', renderEventQuantityLinks);
+
+document.getElementById('eqForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventId = document.getElementById('eqEvent').value;
+    const linkId = document.getElementById('eqLink').value;
+    const picId = document.getElementById('eqPic').value;
+    if (!eventId || !linkId || !picId) { toast('Event, link, dan Production Manager harus dipilih.', 'error'); return; }
+    try {
+        await api('POST', `/events/${eventId}/correct-quantity`, {
+            link_id: Number(linkId), new_quantity: document.getElementById('eqNewQuantity').value,
+            actor_user_id: Number(picId), reason: document.getElementById('eqReason').value.trim(),
+        });
+        toast(`✅ Kuantitas event #${eventId} dikoreksi. Stok & StockTransaction disesuaikan otomatis.`, 'success', 8000);
+        document.getElementById('eqForm').reset();
+        await renderEventCorrection(); await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
+
+// ─── RANTAI BLOCKING / CASCADE MANUAL BERTAHAP (Fase 45) ────────────────
+document.getElementById('eqChainBtn').addEventListener('click', async () => {
+    const eventId = document.getElementById('eqChainEventId').value;
+    const tbody = document.getElementById('eqChainTable');
+    const status = document.getElementById('eqChainStatus');
+    if (!eventId) { toast('Isi nomor event dulu.', 'error'); return; }
+    let result;
+    try { result = await api('GET', `/events/${eventId}/blocking-chain`); }
+    catch (err) { toastError(err, 6000); return; }
+    if (!result.blocked) {
+        status.innerHTML = `<div class="info-box" style="border-color:var(--success);color:var(--success)">✅ Event #${eventId} tidak/sudah tidak punya turunan — bisa langsung dikoreksi/dibatalkan lewat form di atas.</div>`;
+        tbody.innerHTML = '';
+        return;
+    }
+    status.innerHTML = `<div class="info-box">⚠️ Event #${eventId} diblokir oleh ${result.chain.length} event turunan. Batalkan URUT DARI BARIS PALING ATAS, lalu klik "Cek Rantai Blocking" lagi untuk menyegarkan daftar.</div>`;
+    tbody.innerHTML = result.chain.map(r => `<tr>
+            <td>${r.event_type} #${r.event_id}</td>
+            <td>${r.event_date}</td>
+            <td><span class="badge badge-success">${r.status}</span></td>
+            <td>${r.batch_ids.map((id, i) => `#${id} ${r.batch_numbers[i] || ''}`).join(', ')}</td>
+            <td><button type="button" class="btn btn-secondary btn-small eq-chain-load" data-event-id="${r.event_id}">Muat ke Pembatalan</button></td>
+        </tr>`).join('');
+    tbody.querySelectorAll('.eq-chain-load').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.eventId;
+            const csel = document.getElementById('ecCancelEvent');
+            if (![...csel.options].some(o => o.value === id)) {
+                csel.insertAdjacentHTML('afterbegin', `<option value="${id}">Event #${id} (dari rantai blocking)</option>`);
+            }
+            csel.value = id;
+            document.getElementById('ecCancelReason').focus();
+            csel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+    });
+});
+
 document.getElementById('ecHistoryBtn').addEventListener('click', async () => {
     const eventId = document.getElementById('ecHistoryEventId').value;
     const tbody = document.getElementById('ecHistoryTable');
@@ -1938,7 +2008,7 @@ document.getElementById('ecHistoryBtn').addEventListener('click', async () => {
     let rows;
     try { rows = await api('GET', `/events/${eventId}/history`); }
     catch (err) { toastError(err, 6000); return; }
-    const kindLabel = { DATE_CORRECTION: 'Koreksi Tanggal', CANCELLATION: 'Pembatalan' };
+    const kindLabel = { DATE_CORRECTION: 'Koreksi Tanggal', QUANTITY_CORRECTION: 'Koreksi Kuantitas', CANCELLATION: 'Pembatalan' };
     tbody.innerHTML = rows.length ? rows.map(h => `<tr>
             <td>${new Date(h.occurred_at).toLocaleString('id-ID')}</td>
             <td><span class="badge badge-primary">${kindLabel[h.kind] || h.kind}</span></td>

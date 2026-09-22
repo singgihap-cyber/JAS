@@ -10,12 +10,14 @@ from sqlalchemy.orm import Session
 
 from ...models import ProcessEvent
 from ...services.event_correction import (
-    cancel_event, correct_event_date, list_correctable_events, list_event_correction_history,
+    cancel_event, correct_event_date, correct_event_quantity, get_blocking_chain,
+    list_correctable_events, list_event_correction_history, list_event_links,
 )
 from ..database import get_db
 from ..schemas import (
-    CorrectableEventOut, EventCancelIn, EventCancellationOut,
-    EventDateCorrectionIn, EventDateCorrectionOut, EventHistoryOut,
+    BlockingChainOut, CorrectableEventOut, EventCancelIn, EventCancellationOut,
+    EventDateCorrectionIn, EventDateCorrectionOut, EventHistoryOut, EventLinkOut,
+    EventQuantityCorrectionIn, EventQuantityCorrectionOut,
 )
 
 router = APIRouter(tags=["event-correction"])
@@ -56,3 +58,38 @@ def get_event_correction_history(event_id: int, db: Session = Depends(get_db)):
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     return list_event_correction_history(db, event_id=event_id)
+
+
+@router.get("/events/{event_id}/links", response_model=list[EventLinkOut])
+def get_event_links(event_id: int, db: Session = Depends(get_db)):
+    """Fase 45 -- semua EventBatchLink (INPUT & OUTPUT) satu event, dipakai
+    UI untuk memilih link mana yang kuantitasnya mau dikoreksi."""
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    return list_event_links(db, event_id=event_id)
+
+
+@router.post(
+    "/events/{event_id}/correct-quantity", response_model=EventQuantityCorrectionOut, status_code=201
+)
+def correct_event_quantity_endpoint(
+    event_id: int, payload: EventQuantityCorrectionIn, db: Session = Depends(get_db)
+):
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    entry = correct_event_quantity(
+        db, event_id=event_id, link_id=payload.link_id, new_quantity=payload.new_quantity,
+        actor_user_id=payload.actor_user_id, reason=payload.reason,
+    )
+    db.flush()
+    return entry
+
+
+@router.get("/events/{event_id}/blocking-chain", response_model=BlockingChainOut)
+def get_event_blocking_chain(event_id: int, db: Session = Depends(get_db)):
+    """Fase 45 -- rantai transitif event turunan yang harus dibatalkan
+    lebih dulu (cascade manual bertahap, bukan otomatis) sebelum
+    `event_id` sendiri bisa dikoreksi/dibatalkan."""
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    return get_blocking_chain(db, event_id=event_id)

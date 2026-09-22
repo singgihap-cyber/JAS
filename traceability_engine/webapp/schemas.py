@@ -979,8 +979,50 @@ class EventCancellationOut(BaseModel):
 class EventHistoryOut(BaseModel):
     """Mirrors services/event_correction.py `EventHistoryEntry` field-for-field."""
 
-    kind: str  # DATE_CORRECTION | CANCELLATION
+    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION
     occurred_at: dt.datetime
     actor_user_id: int
     reason: str
     detail: str
+
+
+# ------------------------------------------- koreksi kuantitas + rantai blocking (Fase 45)
+class EventLinkOut(BaseModel):
+    """Mirrors services/event_correction.py `EventLinkRow` field-for-field."""
+
+    link_id: int
+    batch_id: int
+    batch_number: Optional[str]
+    role: str
+    quantity: Decimal
+    unit: str
+
+
+class EventQuantityCorrectionIn(BaseModel):
+    link_id: int
+    new_quantity: Decimal
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+
+
+class EventQuantityCorrectionOut(BaseModel):
+    correction_id: int
+    event_id: int
+    link_id: int
+    batch_id: int
+    role: str
+    old_quantity: Decimal
+    new_quantity: Decimal
+    reason: str
+    actor_user_id: int
+    corrected_at: Optional[dt.datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class BlockingChainOut(BaseModel):
+    """Mirrors services/event_correction.py `BlockingChainResult` field-for-field."""
+
+    event_id: int
+    blocked: bool
+    chain: list[CorrectableEventOut]

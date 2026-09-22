@@ -2137,3 +2137,63 @@ def test_api_cancel_event_and_correctable_listing(client, supplier_id, pic_id, p
     assert client.get(f"/api/process-events?event_type=SORTATION&batch_id={bid}").json()[0]["status"] == "VOID"
     # Setelah Sortasi dibatalkan, batch Receiving kembali tak bertutunan
     assert [e["event_id"] for e in client.get("/api/events/correctable", params={"batch_id": bid}).json()] == [rid]
+
+
+# ---- Fase 45 (koreksi kuantitas event historis + rantai blocking) ----
+
+def test_api_correct_event_quantity(client, supplier_id, pic_id, pm_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000"})
+    bid = r.json()["batch"]["batch_id"]
+    rid = r.json()["event"]["event_id"]
+
+    links = client.get(f"/api/events/{rid}/links").json()
+    assert len(links) == 1 and links[0]["role"] == "OUTPUT" and links[0]["batch_id"] == bid
+    link_id = links[0]["link_id"]
+
+    body = {"link_id": link_id, "new_quantity": "25.000", "reason": "Timbangan ulang"}
+    assert client.post(f"/api/events/{rid}/correct-quantity", json={**body, "actor_user_id": pic_id}).status_code == 403
+    assert client.post("/api/events/9999/correct-quantity", json={**body, "actor_user_id": pm_id}).status_code == 404
+    bad_qty = client.post(f"/api/events/{rid}/correct-quantity",
+                          json={**body, "new_quantity": "0", "actor_user_id": pm_id})
+    assert bad_qty.status_code == 422
+    ok = client.post(f"/api/events/{rid}/correct-quantity", json={**body, "actor_user_id": pm_id})
+    assert ok.status_code == 201 and ok.json()["old_quantity"] == "20.000"
+    assert client.get(f"/api/batches/{bid}").json()["current_quantity"] == "25.000"
+
+    hist = client.get(f"/api/events/{rid}/history").json()
+    assert [h["kind"] for h in hist] == ["QUANTITY_CORRECTION"]
+    assert client.get("/api/events/9999/links").status_code == 404
+
+
+def test_api_blocking_chain_manual_cascade(client, supplier_id, pic_id, pm_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000"})
+    bid = r.json()["batch"]["batch_id"]
+    rid = r.json()["event"]["event_id"]
+    s = client.post("/api/sortation", json={
+        "event_date": "2026-09-05", "pic_user_id": pic_id, "batch_id": bid, "gourmet_qty": "20.000"})
+    assert s.status_code in (200, 201), s.text
+    sort_eid = client.get(f"/api/process-events?event_type=SORTATION&batch_id={bid}").json()[0]["event_id"]
+
+    assert client.get("/api/events/9999/blocking-chain").status_code == 404
+    sort_chain = client.get(f"/api/events/{sort_eid}/blocking-chain").json()
+    assert sort_chain == {"event_id": sort_eid, "blocked": False, "chain": []}
+
+    recv_chain = client.get(f"/api/events/{rid}/blocking-chain").json()
+    assert recv_chain["blocked"] is True
+    assert [e["event_id"] for e in recv_chain["chain"]] == [sort_eid]
+
+    blocked = client.post(f"/api/events/{rid}/cancel", json={"actor_user_id": pm_id, "reason": "coba langsung"})
+    assert blocked.status_code == 422
+
+    # Cascade manual bertahap: batalkan urutan chain-nya dulu, baru event target.
+    blocker_id = recv_chain["chain"][0]["event_id"]
+    step = client.post(f"/api/events/{blocker_id}/cancel", json={"actor_user_id": pm_id, "reason": "batal sortasi"})
+    assert step.status_code == 201
+    recv_chain_after = client.get(f"/api/events/{rid}/blocking-chain").json()
+    assert recv_chain_after == {"event_id": rid, "blocked": False, "chain": []}
+    done = client.post(f"/api/events/{rid}/cancel", json={"actor_user_id": pm_id, "reason": "sekarang bisa"})
+    assert done.status_code == 201
