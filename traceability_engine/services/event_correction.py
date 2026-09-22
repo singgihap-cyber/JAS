@@ -98,10 +98,18 @@ keputusan user 2026-09-22, AskUserQuestion):
    membatalkan satu per satu lewat `cancel_event()` yang sudah ada, tidak
    ada jalur baru yang membatalkan lebih dari satu event dalam satu
    panggilan.
+
+Fase 46 -- koreksi catatan (`correct_event_notes`, keputusan user
+2026-09-23): menimpa `ProcessEvent.notes` (isi lama tersimpan di
+`EventNotesCorrection`), Production Manager saja, alasan wajib, dan TETAP
+hanya untuk event tanpa turunan (`_guard_correctable`, sama dengan Fase
+44/45). Koreksi AA/jenis TIDAK di sini -- AA milik batch, lihat
+`services/jenis_correction.py` (cascade ke turunan, boleh walau ada turunan).
 """
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
@@ -116,7 +124,7 @@ from ..exceptions import (
 )
 from ..models import (
     AuditLog, Batch, BatchStatus, EventBatchLink, EventCancellation, EventDateCorrection,
-    EventQuantityCorrection, ProcessEvent, StockTransaction, User,
+    EventNotesCorrection, EventQuantityCorrection, ProcessEvent, StockTransaction, User,
 )
 
 ZERO = Decimal("0")
@@ -399,6 +407,80 @@ def correct_event_quantity(
     return entry
 
 
+def _json_kind(text: Optional[str]) -> Optional[str]:
+    """'object' bila `text` adalah objek JSON, 'other' bila JSON non-objek,
+    None bila bukan JSON / kosong."""
+    if not text:
+        return None
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return None
+    return "object" if isinstance(value, dict) else "other"
+
+
+def _guard_notes_structure(old_notes: Optional[str], new_notes: Optional[str]) -> None:
+    """`[UNCONFIRMED]` Fase 46: sebagian besar layanan menyimpan `notes`
+    sebagai objek JSON terstruktur (Receiving, Sortasi `end_date`, retur
+    supplier, QC/MD, dll.) dan ada pembacanya (mis. `supplier_return.py`).
+    Supaya penimpaan tidak merusak struktur itu: bila catatan lama objek
+    JSON, catatan baru harus objek JSON juga (atau kosong); dan catatan baru
+    yang terbaca sebagai JSON selalu harus berupa objek."""
+    new_kind = _json_kind(new_notes)
+    if new_kind == "other":
+        raise InvalidEventStructureError(
+            "Catatan baru terbaca sebagai JSON tetapi bukan objek {...}; gunakan objek JSON atau teks biasa.")
+    if new_notes is not None and _json_kind(old_notes) == "object" and new_kind != "object":
+        raise InvalidEventStructureError(
+            "Catatan event ini tersimpan sebagai data terstruktur (objek JSON); catatan baru harus "
+            "tetap berupa objek JSON, mis. {\"end_date\": \"2026-09-04\"}.")
+
+
+def correct_event_notes(
+    session: Session,
+    *,
+    event_id: int,
+    new_notes: Optional[str],
+    actor_user_id: int,
+    reason: str,
+) -> EventNotesCorrection:
+    """Fase 46 -- koreksi `notes` event historis (hanya Production Manager,
+    alasan wajib, hanya event tanpa turunan -- keputusan user 2026-09-23).
+    Catatan lama DITIMPA; isi lama tersimpan di `EventNotesCorrection` +
+    AuditLog. Catatan baru kosong = catatan dihapus (None).
+
+    Catatan: beberapa layanan menyimpan data terstruktur di `notes` (mis.
+    tanggal selesai Sortasi, `sortation.py` #8) -- koreksi ini menimpa teks
+    utuh, jadi sekaligus menjadi cara resmi mengoreksi data tersebut."""
+    _require_manager(session, actor_user_id, "mengoreksi catatan event historis")
+    if not reason or not reason.strip():
+        raise InvalidEventStructureError("Alasan koreksi catatan event wajib diisi.")
+    event = session.get(ProcessEvent, event_id)
+    if event is None:
+        raise InvalidEventStructureError(f"Event {event_id} tidak ditemukan.")
+    _guard_correctable(session, event, "dikoreksi catatannya")
+    cleaned = (new_notes or "").strip() or None
+    if cleaned == ((event.notes or "").strip() or None):
+        raise InvalidEventStructureError("Catatan baru sama dengan catatan event saat ini.")
+    _guard_notes_structure(event.notes, cleaned)
+
+    old_notes = event.notes
+    event.notes = cleaned
+    entry = EventNotesCorrection(
+        event_id=event_id, old_notes=old_notes, new_notes=cleaned,
+        reason=reason.strip(), actor_user_id=actor_user_id,
+    )
+    session.add(entry)
+    session.add(AuditLog(
+        entity_type="ProcessEvent", entity_id=event_id, action=AuditAction.UPDATE,
+        actor_user_id=actor_user_id,
+        before_value=f"notes {old_notes!r}",
+        after_value=f"notes {cleaned!r} (koreksi: {reason.strip()})",
+    ))
+    session.flush()
+    return entry
+
+
 @dataclass
 class EventLinkRow:
     link_id: int
@@ -437,6 +519,7 @@ class CorrectableEventRow:
     status: str
     batch_ids: list[int] = field(default_factory=list)
     batch_numbers: list[Optional[str]] = field(default_factory=list)
+    notes: Optional[str] = None  # Fase 46 -- untuk prefill form koreksi catatan
 
 
 def _event_row(session: Session, event: ProcessEvent) -> CorrectableEventRow:
@@ -446,6 +529,7 @@ def _event_row(session: Session, event: ProcessEvent) -> CorrectableEventRow:
         event_id=event.event_id, event_type=event.event_type.value,
         event_date=event.event_date, status=event.status.value,
         batch_ids=ids, batch_numbers=[batches[i].batch_number if i in batches else None for i in ids],
+        notes=event.notes,
     )
 
 
@@ -529,7 +613,7 @@ def get_blocking_chain(session: Session, *, event_id: int) -> BlockingChainResul
 
 @dataclass
 class EventHistoryEntry:
-    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION
+    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION | NOTES_CORRECTION
     occurred_at: dt.datetime
     actor_user_id: int
     reason: str
@@ -537,7 +621,7 @@ class EventHistoryEntry:
 
 
 def list_event_correction_history(session: Session, *, event_id: int) -> list[EventHistoryEntry]:
-    """Gabungan riwayat koreksi tanggal + kuantitas + pembatalan satu event, terlama dulu."""
+    """Gabungan riwayat koreksi tanggal + kuantitas + catatan + pembatalan satu event, terlama dulu."""
     entries: list[EventHistoryEntry] = []
     for c in session.execute(
         select(EventDateCorrection).where(EventDateCorrection.event_id == event_id)
@@ -554,6 +638,14 @@ def list_event_correction_history(session: Session, *, event_id: int) -> list[Ev
         entries.append(EventHistoryEntry(
             kind="QUANTITY_CORRECTION", occurred_at=c.corrected_at, actor_user_id=c.actor_user_id,
             reason=c.reason, detail=f"{c.role} batch #{c.batch_id}: {c.old_quantity} -> {c.new_quantity}",
+        ))
+    for c in session.execute(
+        select(EventNotesCorrection).where(EventNotesCorrection.event_id == event_id)
+        .order_by(EventNotesCorrection.correction_id)
+    ).scalars():
+        entries.append(EventHistoryEntry(
+            kind="NOTES_CORRECTION", occurred_at=c.corrected_at, actor_user_id=c.actor_user_id,
+            reason=c.reason, detail=f"{c.old_notes or '(kosong)'} -> {c.new_notes or '(kosong)'}",
         ))
     for c in session.execute(
         select(EventCancellation).where(EventCancellation.event_id == event_id)

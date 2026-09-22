@@ -2197,3 +2197,50 @@ def test_api_blocking_chain_manual_cascade(client, supplier_id, pic_id, pm_id):
     assert recv_chain_after == {"event_id": rid, "blocked": False, "chain": []}
     done = client.post(f"/api/events/{rid}/cancel", json={"actor_user_id": pm_id, "reason": "sekarang bisa"})
     assert done.status_code == 201
+
+
+def test_api_jenis_correction_cascade(client, supplier_id, pic_id, pm_id):
+    """Fase 46 -- pratinjau + koreksi jenis (AA) via API, ikut batch turunan."""
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000", "jenis_code": "02", "grade_code": "00"})
+    assert r.status_code == 201, r.text
+    bid = r.json()["batch"]["batch_id"]
+    old_no = r.json()["batch"]["batch_number"]
+    assert old_no and old_no.startswith("02")
+
+    assert client.get("/api/batches/9999/jenis-correction/preview?new_jenis_code=01").status_code == 404
+    assert client.get(f"/api/batches/{bid}/jenis-correction/preview?new_jenis_code=03").status_code == 422
+    prev = client.get(f"/api/batches/{bid}/jenis-correction/preview?new_jenis_code=01").json()
+    assert prev["ok"] is True and prev["changes"][0]["new_batch_number"] == "01" + old_no[2:]
+
+    body = {"new_jenis_code": "01", "reason": "Salah pilih jenis"}
+    assert client.post(f"/api/batches/{bid}/correct-jenis", json={**body, "actor_user_id": pic_id}).status_code == 403
+    ok = client.post(f"/api/batches/{bid}/correct-jenis", json={**body, "actor_user_id": pm_id})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["notice"] and ok.json()["plan"]["ok"] is True
+    assert client.get(f"/api/batches/{bid}").json()["batch_number"] == "01" + old_no[2:]
+    hist = client.get(f"/api/batches/{bid}/jenis-history").json()
+    assert len(hist) == 1 and hist[0]["old_jenis_code"] == "02"
+    assert len(client.get(f"/api/batches/{bid}/number-history").json()) == 1
+
+
+def test_api_correct_event_notes(client, supplier_id, pic_id, pm_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000"})
+    rid = r.json()["event"]["event_id"]
+    plain = client.post(f"/api/events/{rid}/correct-notes",
+                        json={"new_notes": "teks biasa", "reason": "x", "actor_user_id": pm_id})
+    assert plain.status_code == 422  # catatan Receiving berupa objek JSON -> harus tetap objek
+    new_notes = '{"net_weight": "20.000", "keterangan": "Catatan terkoreksi"}'
+    body = {"new_notes": new_notes, "reason": "Salah tulis"}
+    assert client.post(f"/api/events/{rid}/correct-notes", json={**body, "actor_user_id": pic_id}).status_code == 403
+    assert client.post("/api/events/9999/correct-notes", json={**body, "actor_user_id": pm_id}).status_code == 404
+    ok = client.post(f"/api/events/{rid}/correct-notes", json={**body, "actor_user_id": pm_id})
+    assert ok.status_code == 201 and ok.json()["new_notes"] == new_notes
+    same = client.post(f"/api/events/{rid}/correct-notes", json={**body, "actor_user_id": pm_id})
+    assert same.status_code == 422
+    rows = {e["event_id"]: e for e in client.get("/api/events/correctable").json()}
+    assert rows[rid]["notes"] == new_notes
+    assert [h["kind"] for h in client.get(f"/api/events/{rid}/history").json()] == ["NOTES_CORRECTION"]

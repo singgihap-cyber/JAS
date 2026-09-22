@@ -86,7 +86,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
-        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderSupplierReturns(); renderAaChain(); renderEventCorrection(); }
+        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderSupplierReturns(); renderAaChain(); renderEventCorrection(); renderJenisBatchOptions(); }
         if (page === 'stock') renderStockSummary();
         if (page === 'batch-history') { renderRendemenSortation(); renderRendemenMixing(); }
     });
@@ -116,7 +116,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic', 'eqPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic', 'eqPic', 'enPic', 'jcPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -1900,7 +1900,88 @@ async function renderEventCorrection() {
     if (csel) csel.innerHTML = optHtml;
     const qsel = document.getElementById('eqEvent');
     if (qsel) { qsel.innerHTML = optHtml; await renderEventQuantityLinks(); }
+    const nsel = document.getElementById('enEvent');
+    if (nsel) {
+        correctableNotes = new Map(rows.map(r => [String(r.event_id), r.notes || '']));
+        nsel.innerHTML = optHtml; fillEventNotes();
+    }
 }
+// ─── KOREKSI CATATAN EVENT (Fase 46) ────────────────────────────────────
+let correctableNotes = new Map();
+function fillEventNotes() {
+    const id = document.getElementById('enEvent').value;
+    document.getElementById('enNewNotes').value = correctableNotes.get(id) || '';
+}
+document.getElementById('enEvent').addEventListener('change', fillEventNotes);
+document.getElementById('enForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventId = document.getElementById('enEvent').value;
+    const picId = document.getElementById('enPic').value;
+    if (!eventId || !picId) { toast('Event dan Production Manager harus dipilih.', 'error'); return; }
+    try {
+        await api('POST', `/events/${eventId}/correct-notes`, {
+            new_notes: document.getElementById('enNewNotes').value,
+            actor_user_id: Number(picId), reason: document.getElementById('enReason').value.trim(),
+        });
+        toast(`✅ Catatan event #${eventId} dikoreksi.`, 'success');
+        document.getElementById('enReason').value = '';
+        await renderEventCorrection(); await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
+
+// ─── KOREKSI JENIS (AA) + CASCADE TURUNAN (Fase 46) ─────────────────────
+async function renderJenisBatchOptions() {
+    const sel = document.getElementById('jcBatch');
+    if (!sel) return;
+    let rows;
+    try { rows = await api('GET', '/batches'); } catch (err) { return; }
+    const keep = sel.value;
+    sel.innerHTML = rows.filter(b => b.batch_number)
+        .map(b => `<option value="${b.batch_id}">#${b.batch_id} ${b.batch_number}${b.jenis_label ? ' · ' + b.jenis_label : ''}</option>`).join('');
+    if (keep) sel.value = keep;
+    document.getElementById('jcPreviewStatus').innerHTML = '';
+    document.getElementById('jcPreviewTable').innerHTML = '';
+}
+function renderJenisPlan(plan) {
+    const status = document.getElementById('jcPreviewStatus');
+    status.innerHTML = plan.ok
+        ? `<div class="info-box" style="border-color:var(--success);color:var(--success)">✅ Jenis ${plan.old_jenis_code} → ${plan.new_jenis_code}: ${plan.changes.length} batch akan diubah, ${plan.stops.length} titik henti.</div>`
+        : `<div class="info-box" style="border-color:var(--danger);color:var(--danger)">⛔ Koreksi akan DITOLAK seluruhnya: ${plan.blockers.map(b => `#${b.batch_id} ${b.batch_number || ''} — ${b.note}`).join('; ')}</div>`;
+    const row = (badge, r) => `<tr>
+            <td>${badge}</td>
+            <td>#${r.batch_id} ${r.batch_number || ''}</td>
+            <td>${r.new_batch_number || '—'}</td>
+            <td>${r.via_event_id ? `${r.via_event_type} #${r.via_event_id}` : '—'}</td>
+            <td>${r.note || ''}</td>
+        </tr>`;
+    document.getElementById('jcPreviewTable').innerHTML =
+        plan.changes.map(r => row('<span class="badge badge-primary">Diubah</span>', r)).join('') +
+        plan.stops.map(r => row('<span class="badge badge-warning">Berhenti</span>', r)).join('');
+}
+document.getElementById('jcPreviewBtn').addEventListener('click', async () => {
+    const batchId = document.getElementById('jcBatch').value;
+    if (!batchId) { toast('Pilih batch dulu.', 'error'); return; }
+    try {
+        const plan = await api('GET', `/batches/${batchId}/jenis-correction/preview?new_jenis_code=${document.getElementById('jcJenis').value}`);
+        renderJenisPlan(plan);
+    } catch (err) { toastError(err, 6000); }
+});
+document.getElementById('jenisCorrectForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const batchId = document.getElementById('jcBatch').value;
+    const picId = document.getElementById('jcPic').value;
+    if (!batchId || !picId) { toast('Batch dan Production Manager harus dipilih.', 'error'); return; }
+    try {
+        const res = await api('POST', `/batches/${batchId}/correct-jenis`, {
+            new_jenis_code: document.getElementById('jcJenis').value,
+            actor_user_id: Number(picId), reason: document.getElementById('jcReason').value.trim(),
+        });
+        toast(`✅ Jenis dikoreksi: ${res.plan.changes.length} batch diubah. ${res.notice || ''}`, 'success', 12000);
+        document.getElementById('jcReason').value = '';
+        await renderJenisBatchOptions(); renderJenisPlan(res.plan);
+        await renderAaChain(); renderAaChainBanner(); await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
 document.getElementById('ecRefreshBtn').addEventListener('click', renderEventCorrection);
 document.getElementById('ecBatch').addEventListener('change', renderEventCorrection);
 
@@ -2008,7 +2089,7 @@ document.getElementById('ecHistoryBtn').addEventListener('click', async () => {
     let rows;
     try { rows = await api('GET', `/events/${eventId}/history`); }
     catch (err) { toastError(err, 6000); return; }
-    const kindLabel = { DATE_CORRECTION: 'Koreksi Tanggal', QUANTITY_CORRECTION: 'Koreksi Kuantitas', CANCELLATION: 'Pembatalan' };
+    const kindLabel = { DATE_CORRECTION: 'Koreksi Tanggal', QUANTITY_CORRECTION: 'Koreksi Kuantitas', NOTES_CORRECTION: 'Koreksi Catatan', CANCELLATION: 'Pembatalan' };
     tbody.innerHTML = rows.length ? rows.map(h => `<tr>
             <td>${new Date(h.occurred_at).toLocaleString('id-ID')}</td>
             <td><span class="badge badge-primary">${kindLabel[h.kind] || h.kind}</span></td>

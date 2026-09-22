@@ -413,3 +413,41 @@ class EventQuantityCorrection(Base):
     reason: Mapped[str] = mapped_column(Text)
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class EventNotesCorrection(Base):
+    """Fase 46 -- riwayat koreksi `ProcessEvent.notes` pada event historis
+    (Production Manager, alasan wajib). Keputusan user 2026-09-23: catatan
+    lama DITIMPA (isi lama tersimpan di sini sebagai jejak), dan tetap hanya
+    untuk event TANPA turunan (syarat sama dengan Fase 44/45,
+    `services/event_correction.py` `_guard_correctable`)."""
+
+    __tablename__ = "event_notes_corrections"
+
+    correction_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
+    old_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class JenisCorrection(Base):
+    """Fase 46 -- satu koreksi Jenis (AA) pada batch akar + cascade ke batch
+    turunannya (`services/jenis_correction.py`). Setiap batch yang nomornya
+    ikut berubah juga punya baris `BatchNumberCorrection` sendiri (jalur Fase
+    42), jadi riwayat nomor per batch tetap lengkap; tabel ini menyimpan
+    ringkasan per koreksi (batch mana yang diubah, di mana cascade berhenti)."""
+
+    __tablename__ = "jenis_corrections"
+
+    correction_id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.batch_id"), index=True)
+    old_jenis_code: Mapped[str] = mapped_column(String(2))
+    new_jenis_code: Mapped[str] = mapped_column(String(2))
+    changed_batch_ids: Mapped[str] = mapped_column(Text)  # "12,15,18"
+    stopped_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())

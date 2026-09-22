@@ -11,10 +11,14 @@ from sqlalchemy.orm import Session
 from ...models import Batch
 from ...services.aa_chain import audit_aa_chain
 from ...services.aa_review import correct_batch_number, list_number_history, review_aa_finding
+from ...services.jenis_correction import (
+    correct_batch_jenis, list_jenis_corrections, plan_jenis_correction,
+)
 from ..database import get_db
 from ..schemas import (
     AaChangeFindingOut, AaFindingReviewIn, AaFindingReviewOut,
-    BatchNumberCorrectionIn, BatchNumberCorrectionOut,
+    BatchNumberCorrectionIn, BatchNumberCorrectionOut, JenisCorrectionIn, JenisCorrectionOut,
+    JenisCorrectionPlanOut,
 )
 
 router = APIRouter(tags=["aa-chain"])
@@ -65,3 +69,44 @@ def get_number_history(batch_id: int, db: Session = Depends(get_db)):
     if db.get(Batch, batch_id) is None:
         raise HTTPException(404, f"Batch {batch_id} not found")
     return list_number_history(db, batch_id=batch_id)
+
+
+# ---------------------------------------------- Fase 46: koreksi jenis + cascade
+def _plan_out(plan) -> JenisCorrectionPlanOut:
+    return JenisCorrectionPlanOut(
+        batch_id=plan.batch_id, old_jenis_code=plan.old_jenis_code,
+        new_jenis_code=plan.new_jenis_code, ok=plan.ok,
+        changes=plan.changes, stops=plan.stops, blockers=plan.blockers,
+    )
+
+
+@router.get("/batches/{batch_id}/jenis-correction/preview", response_model=JenisCorrectionPlanOut)
+def preview_jenis_correction(batch_id: int, new_jenis_code: str, db: Session = Depends(get_db)):
+    """Rencana koreksi jenis (tanpa menulis): batch yang akan diubah, titik
+    henti cascade (Mixing dll.), dan pemblokir (batch sudah dikirim)."""
+    if db.get(Batch, batch_id) is None:
+        raise HTTPException(404, f"Batch {batch_id} not found")
+    return _plan_out(plan_jenis_correction(db, batch_id=batch_id, new_jenis_code=new_jenis_code))
+
+
+@router.post("/batches/{batch_id}/correct-jenis", response_model=JenisCorrectionOut, status_code=201)
+def correct_jenis_endpoint(batch_id: int, payload: JenisCorrectionIn, db: Session = Depends(get_db)):
+    if db.get(Batch, batch_id) is None:
+        raise HTTPException(404, f"Batch {batch_id} not found")
+    entry, plan = correct_batch_jenis(
+        db, batch_id=batch_id, new_jenis_code=payload.new_jenis_code,
+        actor_user_id=payload.actor_user_id, reason=payload.reason,
+    )
+    db.flush()
+    out = JenisCorrectionOut.model_validate(entry)
+    out.notice = entry.notice
+    out.plan = _plan_out(plan)
+    return out
+
+
+@router.get("/batches/{batch_id}/jenis-history", response_model=list[JenisCorrectionOut])
+def get_jenis_history(batch_id: int, db: Session = Depends(get_db)):
+    """Koreksi jenis yang mengubah batch ini (sebagai akar atau turunan)."""
+    if db.get(Batch, batch_id) is None:
+        raise HTTPException(404, f"Batch {batch_id} not found")
+    return list_jenis_corrections(db, batch_id=batch_id)

@@ -1002,6 +1002,44 @@
                     </div>
                     <button type="submit" class="btn btn-secondary">Ganti Nomor Batch</button>
                 </form>
+
+                <div class="form-divider">🧬 Koreksi Jenis (AA) + batch turunan (Fase 46)</div>
+                <div class="info-box">
+                    Mengganti segmen Jenis (AA) nomor batch dan ikut mengubah batch turunannya. Cascade berhenti di
+                    hasil Mixing, batch yang jenisnya sudah berbeda, batch tanpa nomor, dan batch yang punya sumber lain
+                    (ditandai, tidak diubah). Koreksi ditolak seluruhnya bila ada batch yang akan diubah sudah dikirim.
+                    Klik "Pratinjau" dulu untuk melihat daftarnya.
+                </div>
+                <form id="jenisCorrectForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Batch akar</label>
+                        <select class="form-select" id="jcBatch" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:140px;margin-bottom:0">
+                        <label class="form-label">Jenis baru</label>
+                        <select class="form-select" id="jcJenis" required>
+                            <option value="01">01 — Tahitensis</option>
+                            <option value="02">02 — Planifolia</option>
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn-secondary" id="jcPreviewBtn">Pratinjau</button>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Oleh (Production Manager)</label>
+                        <select class="form-select" id="jcPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan</label>
+                        <input class="form-input" id="jcReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="jcSubmitBtn">Koreksi Jenis</button>
+                </form>
+                <div id="jcPreviewStatus" style="margin-top:8px"></div>
+                <div class="table-container" style="margin-top:6px">
+                    <table>
+                        <thead><tr><th>Status</th><th>Batch</th><th>Nomor baru</th><th>Lewat event</th><th>Keterangan</th></tr></thead>
+                        <tbody id="jcPreviewTable"></tbody>
+                    </table>
+                </div>
             </div>
 
             <div class="section">
@@ -1115,6 +1153,27 @@
                         <input class="form-input" id="eqReason" required>
                     </div>
                     <button type="submit" class="btn btn-primary">Koreksi Kuantitas</button>
+                </form>
+
+                <div class="form-divider">📝 Koreksi catatan event (Fase 46)</div>
+                <form id="enForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Event</label>
+                        <select class="form-select" id="enEvent" required></select>
+                    </div>
+                    <div class="form-group" style="flex:3;min-width:260px;margin-bottom:0">
+                        <label class="form-label">Catatan baru (menimpa isi lama; kosong = hapus; bila isi lama berupa {...} JSON, tetap tulis sebagai JSON)</label>
+                        <textarea class="form-input" id="enNewNotes" rows="2"></textarea>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Oleh (Production Manager)</label>
+                        <select class="form-select" id="enPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan</label>
+                        <input class="form-input" id="enReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Koreksi Catatan</button>
                 </form>
 
                 <div class="form-divider">🔗 Rantai Blocking (cascade manual bertahap, Fase 45)</div>

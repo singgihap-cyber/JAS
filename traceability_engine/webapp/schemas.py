@@ -940,6 +940,7 @@ class CorrectableEventOut(BaseModel):
     status: str
     batch_ids: list[int]
     batch_numbers: list[Optional[str]]
+    notes: Optional[str] = None  # Fase 46
 
 
 class EventDateCorrectionIn(BaseModel):
@@ -979,7 +980,7 @@ class EventCancellationOut(BaseModel):
 class EventHistoryOut(BaseModel):
     """Mirrors services/event_correction.py `EventHistoryEntry` field-for-field."""
 
-    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION
+    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION | NOTES_CORRECTION
     occurred_at: dt.datetime
     actor_user_id: int
     reason: str
@@ -1026,3 +1027,69 @@ class BlockingChainOut(BaseModel):
     event_id: int
     blocked: bool
     chain: list[CorrectableEventOut]
+
+
+# ------------------------------------------- koreksi catatan + jenis/cascade (Fase 46)
+class EventNotesCorrectionIn(BaseModel):
+    new_notes: Optional[str] = None  # kosong = hapus catatan
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+
+
+class EventNotesCorrectionOut(BaseModel):
+    correction_id: int
+    event_id: int
+    old_notes: Optional[str] = None
+    new_notes: Optional[str] = None
+    reason: str
+    actor_user_id: int
+    corrected_at: Optional[dt.datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class JenisPlanRowOut(BaseModel):
+    """Mirrors services/jenis_correction.py `JenisPlanRow`."""
+
+    batch_id: int
+    batch_number: Optional[str] = None
+    new_batch_number: Optional[str] = None
+    via_event_id: Optional[int] = None
+    via_event_type: Optional[str] = None
+    note: str = ""
+
+    model_config = {"from_attributes": True}
+
+
+class JenisCorrectionPlanOut(BaseModel):
+    batch_id: int
+    old_jenis_code: str
+    new_jenis_code: str
+    ok: bool
+    changes: list[JenisPlanRowOut]
+    stops: list[JenisPlanRowOut]
+    blockers: list[JenisPlanRowOut]
+
+    model_config = {"from_attributes": True}
+
+
+class JenisCorrectionIn(BaseModel):
+    new_jenis_code: str
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+
+
+class JenisCorrectionOut(BaseModel):
+    correction_id: int
+    batch_id: int
+    old_jenis_code: str
+    new_jenis_code: str
+    changed_batch_ids: str
+    stopped_summary: Optional[str] = None
+    reason: str
+    actor_user_id: int
+    corrected_at: Optional[dt.datetime] = None
+    notice: Optional[str] = None
+    plan: Optional[JenisCorrectionPlanOut] = None
+
+    model_config = {"from_attributes": True}

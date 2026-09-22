@@ -10,14 +10,15 @@ from sqlalchemy.orm import Session
 
 from ...models import ProcessEvent
 from ...services.event_correction import (
-    cancel_event, correct_event_date, correct_event_quantity, get_blocking_chain,
+    cancel_event, correct_event_date, correct_event_notes, correct_event_quantity, get_blocking_chain,
     list_correctable_events, list_event_correction_history, list_event_links,
 )
 from ..database import get_db
 from ..schemas import (
     BlockingChainOut, CorrectableEventOut, EventCancelIn, EventCancellationOut,
     EventDateCorrectionIn, EventDateCorrectionOut, EventHistoryOut, EventLinkOut,
-    EventQuantityCorrectionIn, EventQuantityCorrectionOut,
+    EventNotesCorrectionIn, EventNotesCorrectionOut, EventQuantityCorrectionIn,
+    EventQuantityCorrectionOut,
 )
 
 router = APIRouter(tags=["event-correction"])
@@ -93,3 +94,16 @@ def get_event_blocking_chain(event_id: int, db: Session = Depends(get_db)):
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     return get_blocking_chain(db, event_id=event_id)
+
+
+@router.post("/events/{event_id}/correct-notes", response_model=EventNotesCorrectionOut, status_code=201)
+def correct_event_notes_endpoint(event_id: int, payload: EventNotesCorrectionIn, db: Session = Depends(get_db)):
+    """Fase 46 -- timpa catatan event historis (PM, alasan wajib, tanpa turunan)."""
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    entry = correct_event_notes(
+        db, event_id=event_id, new_notes=payload.new_notes,
+        actor_user_id=payload.actor_user_id, reason=payload.reason,
+    )
+    db.flush()
+    return entry
