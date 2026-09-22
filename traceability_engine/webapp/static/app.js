@@ -86,7 +86,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
-        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderSupplierReturns(); renderAaChain(); }
+        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderSupplierReturns(); renderAaChain(); renderEventCorrection(); }
         if (page === 'stock') renderStockSummary();
         if (page === 'batch-history') { renderRendemenSortation(); renderRendemenMixing(); }
     });
@@ -116,7 +116,7 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic']
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
 }
 
@@ -671,6 +671,15 @@ function renderBatchSelect() {
     refreshPackingSourceOptions();
     refreshDeliverySourceOptions();
     refreshSampleDeliverySourceOptions();
+    // Fase 44 -- semua batch (bukan hanya ACTIVE): event historis yang layak
+    // dikoreksi/dibatalkan bisa ada di batch yang sudah CONSUMED/REJECTED.
+    const ecSel = document.getElementById('ecBatch');
+    if (ecSel) {
+        const current = ecSel.value;
+        ecSel.innerHTML = '<option value="">Semua batch</option>' + batches.map(b =>
+            `<option value="${b.batch_id}">#${b.batch_id} ${b.batch_number || ''} — ${b.batch_type} (${b.status})</option>`).join('');
+        if (current) ecSel.value = current;
+    }
 }
 
 function renderProsesFields() {
@@ -1866,6 +1875,79 @@ document.getElementById('batchNumberCorrectForm').addEventListener('submit', asy
     } catch (err) { toastError(err, 6000); }
 });
 document.getElementById('aaChainHijauOnly').addEventListener('change', renderAaChain);
+
+// ─── KOREKSI TANGGAL & PEMBATALAN EVENT HISTORIS (Fase 44) ──────────────
+async function renderEventCorrection() {
+    const tbody = document.getElementById('ecTable');
+    if (!tbody) return;
+    const batchId = document.getElementById('ecBatch').value;
+    let rows;
+    try { rows = await api('GET', '/events/correctable' + (batchId ? `?batch_id=${batchId}` : '')); }
+    catch (err) { toastError(err, 6000); return; }
+    tbody.innerHTML = rows.length ? rows.map(r => `<tr>
+            <td>${r.event_type} #${r.event_id}</td>
+            <td>${r.event_date}</td>
+            <td><span class="badge badge-success">${r.status}</span></td>
+            <td>${r.batch_ids.map((id, i) => `#${id} ${r.batch_numbers[i] || ''}`).join(', ')}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">Tidak ada event yang bisa dikoreksi/dibatalkan (semua sudah punya turunan, atau belum ada event)</td></tr>';
+    const optHtml = rows.map(r =>
+        `<option value="${r.event_id}">${r.event_type} #${r.event_id} (${r.event_date}) — ${r.batch_ids.map((id, i) => r.batch_numbers[i] || '#' + id).join(', ')}</option>`
+    ).join('');
+    const dsel = document.getElementById('ecDateEvent');
+    if (dsel) dsel.innerHTML = optHtml;
+    const csel = document.getElementById('ecCancelEvent');
+    if (csel) csel.innerHTML = optHtml;
+}
+document.getElementById('ecRefreshBtn').addEventListener('click', renderEventCorrection);
+document.getElementById('ecBatch').addEventListener('change', renderEventCorrection);
+
+document.getElementById('ecDateForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventId = document.getElementById('ecDateEvent').value;
+    const picId = document.getElementById('ecDatePic').value;
+    if (!eventId || !picId) { toast('Event dan Production Manager harus dipilih.', 'error'); return; }
+    try {
+        await api('POST', `/events/${eventId}/correct-date`, {
+            new_event_date: document.getElementById('ecNewDate').value,
+            actor_user_id: Number(picId), reason: document.getElementById('ecDateReason').value.trim(),
+        });
+        toast(`✅ Tanggal event #${eventId} dikoreksi.`, 'success');
+        document.getElementById('ecDateForm').reset();
+        await renderEventCorrection(); await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
+document.getElementById('ecCancelForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventId = document.getElementById('ecCancelEvent').value;
+    const picId = document.getElementById('ecCancelPic').value;
+    if (!eventId || !picId) { toast('Event dan Production Manager harus dipilih.', 'error'); return; }
+    try {
+        await api('POST', `/events/${eventId}/cancel`, {
+            actor_user_id: Number(picId), reason: document.getElementById('ecCancelReason').value.trim(),
+        });
+        toast(`✅ Event #${eventId} dibatalkan (VOID). Efek stok sudah dibalik.`, 'success', 6000);
+        document.getElementById('ecCancelForm').reset();
+        await renderEventCorrection(); await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
+document.getElementById('ecHistoryBtn').addEventListener('click', async () => {
+    const eventId = document.getElementById('ecHistoryEventId').value;
+    const tbody = document.getElementById('ecHistoryTable');
+    if (!eventId) { toast('Isi nomor event dulu.', 'error'); return; }
+    let rows;
+    try { rows = await api('GET', `/events/${eventId}/history`); }
+    catch (err) { toastError(err, 6000); return; }
+    const kindLabel = { DATE_CORRECTION: 'Koreksi Tanggal', CANCELLATION: 'Pembatalan' };
+    tbody.innerHTML = rows.length ? rows.map(h => `<tr>
+            <td>${new Date(h.occurred_at).toLocaleString('id-ID')}</td>
+            <td><span class="badge badge-primary">${kindLabel[h.kind] || h.kind}</span></td>
+            <td>${h.detail}</td>
+            <td>${h.reason}</td>
+            <td>${picName(h.actor_user_id)}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">Belum ada riwayat koreksi/pembatalan untuk event ini</td></tr>';
+});
 
 async function renderAuditLog() {
     const logs = await api('GET', '/audit-logs?entity_type=Batch');

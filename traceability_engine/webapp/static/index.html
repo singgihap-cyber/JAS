@@ -1028,6 +1028,84 @@
             </div>
 
             <div class="section">
+                <div class="section-title">🕰️ Koreksi Tanggal &amp; Pembatalan Event Historis</div>
+                <div class="info-box">
+                    Backlog sejak Fase 42 (mis. event MD 15/6 pada batch <code>030218-260618-00</code> yang sampai
+                    sekarang hanya dibiarkan sebagai catatan historis, Fase 23/28/37). Hanya <b>Production Manager</b>,
+                    alasan wajib. Lingkup koreksi <b>hanya tanggal event</b> (<code>event_date</code>) — kuantitas, Jenis
+                    (AA), dan catatan di luar lingkup ini. Pembatalan menandai event <b>VOID</b> (jejak tetap tersimpan,
+                    tidak dihapus); efek stoknya dibalik otomatis. Keduanya <b>hanya berlaku untuk event yang belum
+                    punya event/batch turunan setelahnya</b> pada batch yang sama, supaya rute turunan tidak jadi tidak
+                    konsisten — pilih batch (opsional) lalu muat daftar event yang masih boleh dikoreksi/dibatalkan.
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Batch (opsional — kosongkan untuk semua)</label>
+                        <select class="form-select" id="ecBatch"><option value="">Semua batch</option></select>
+                    </div>
+                    <div class="form-group" style="align-self:end">
+                        <button type="button" class="btn btn-secondary" id="ecRefreshBtn">🔄 Muat Event yang Bisa Dikoreksi</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Event</th><th>Tanggal</th><th>Status</th><th>Batch Terkait</th></tr></thead>
+                        <tbody id="ecTable"></tbody>
+                    </table>
+                </div>
+                <form id="ecDateForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Koreksi tanggal event</label>
+                        <select class="form-select" id="ecDateEvent" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:140px;margin-bottom:0">
+                        <label class="form-label">Tanggal baru</label>
+                        <input type="date" class="form-input" id="ecNewDate" required>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Oleh (Production Manager)</label>
+                        <select class="form-select" id="ecDatePic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan</label>
+                        <input class="form-input" id="ecDateReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Koreksi Tanggal</button>
+                </form>
+                <form id="ecCancelForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:2;min-width:220px;margin-bottom:0">
+                        <label class="form-label">Batalkan event (VOID)</label>
+                        <select class="form-select" id="ecCancelEvent" required></select>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Oleh (Production Manager)</label>
+                        <select class="form-select" id="ecCancelPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan pembatalan</label>
+                        <input class="form-input" id="ecCancelReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-secondary">Batalkan Event</button>
+                </form>
+                <div class="form-divider">📜 Riwayat koreksi/pembatalan event terpilih</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Lihat riwayat untuk event #</label>
+                        <input class="form-input" id="ecHistoryEventId" type="number" min="1" placeholder="mis. 12">
+                    </div>
+                    <div class="form-group" style="align-self:end">
+                        <button type="button" class="btn btn-secondary" id="ecHistoryBtn">Tampilkan Riwayat</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Waktu</th><th>Jenis</th><th>Detail</th><th>Alasan</th><th>Oleh</th></tr></thead>
+                        <tbody id="ecHistoryTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
                 <div class="section-title">📜 Audit Log Terbaru (Batch)</div>
                 <div class="info-box">
                     Mencakup ketiga aksi di atas (Adjustment, Reject, Supersede) — setiap perubahan status/qty

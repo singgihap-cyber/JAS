@@ -928,3 +928,59 @@ class SupplierReturnRemindersOut(BaseModel):
     total_quantity: Decimal
     message: str
     items: list[SupplierReturnRowOut]
+
+
+# ------------------------------------------- koreksi & pembatalan event historis (Fase 44)
+class CorrectableEventOut(BaseModel):
+    """Mirrors services/event_correction.py `CorrectableEventRow` field-for-field."""
+
+    event_id: int
+    event_type: str
+    event_date: dt.date
+    status: str
+    batch_ids: list[int]
+    batch_numbers: list[Optional[str]]
+
+
+class EventDateCorrectionIn(BaseModel):
+    new_event_date: dt.date
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+
+
+class EventDateCorrectionOut(BaseModel):
+    correction_id: int
+    event_id: int
+    old_event_date: dt.date
+    new_event_date: dt.date
+    reason: str
+    actor_user_id: int
+    corrected_at: Optional[dt.datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class EventCancelIn(BaseModel):
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+
+
+class EventCancellationOut(BaseModel):
+    cancellation_id: int
+    event_id: int
+    event_type: str
+    reason: str
+    actor_user_id: int
+    cancelled_at: Optional[dt.datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class EventHistoryOut(BaseModel):
+    """Mirrors services/event_correction.py `EventHistoryEntry` field-for-field."""
+
+    kind: str  # DATE_CORRECTION | CANCELLATION
+    occurred_at: dt.datetime
+    actor_user_id: int
+    reason: str
+    detail: str

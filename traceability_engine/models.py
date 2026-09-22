@@ -348,3 +348,40 @@ class BatchNumberCorrection(Base):
     reason: Mapped[str] = mapped_column(Text)
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class EventDateCorrection(Base):
+    """Fase 44 -- riwayat koreksi `event_date` pada event historis (Production
+    Manager, alasan wajib). Hanya event TANPA event/batch turunan setelahnya
+    pada batch yang sama boleh dikoreksi (lihat services/event_correction.py
+    `_downstream_event_ids`) -- menghindari inkonsistensi rute turunan.
+    Hanya `event_date`; field lain (kuantitas, AA, catatan) di luar lingkup
+    fase ini."""
+
+    __tablename__ = "event_date_corrections"
+
+    correction_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
+    old_event_date: Mapped[dt.date] = mapped_column(Date)
+    new_event_date: Mapped[dt.date] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class EventCancellation(Base):
+    """Fase 44 -- riwayat pembatalan (soft-cancel) event historis. Status
+    event yang sebenarnya tetap `ProcessEvent.status = VOID`; tabel ini
+    adalah jejak siapa/kapan/kenapa yang bisa di-query per event, terpisah
+    dari AuditLog generik. Sama syarat kelayakan dengan koreksi tanggal
+    (tanpa turunan); efek stok event dibalik lewat StockTransaction
+    kompensasi (lihat services/event_correction.py `cancel_event`)."""
+
+    __tablename__ = "event_cancellations"
+
+    cancellation_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    cancelled_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())

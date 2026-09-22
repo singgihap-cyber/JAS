@@ -14,13 +14,15 @@ ledger against the `Batch.current_quantity` cache. This module is exactly
 that layer.
 
 Per `13_STOCK.md`'s explicit instruction, this module is read-only: no
-function here ever assigns to `Batch.current_quantity`. The only two places
-in the codebase allowed to do that remain `record_process_event()`
-(services/events.py) and `record_adjustment()` (services/adjustment.py) --
-both already gated/validated (quantity reconciliation, insufficient-stock
-guard, PRODUCTION_MANAGER-only adjustment + mandatory reason + AuditLog).
-This module adds no new way to change a balance, only ways to read and
-verify it.
+function here ever assigns to `Batch.current_quantity`. Three places in the
+codebase are allowed to do that: `record_process_event()`
+(services/events.py), `record_adjustment()` (services/adjustment.py), and,
+since Fase 44, `cancel_event()` (services/event_correction.py) -- all three
+already gated/validated (quantity reconciliation, insufficient-stock guard,
+PRODUCTION_MANAGER-only + mandatory reason + AuditLog) and all three keep
+`StockTransaction` in lockstep with the cache (Fase 44's reversal adds
+compensating rows rather than editing/deleting existing ones). This module
+adds no new way to change a balance, only ways to read and verify it.
 
 ## Why a reconciliation function, concretely
 

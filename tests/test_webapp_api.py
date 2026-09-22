@@ -2080,3 +2080,60 @@ def test_api_aa_review_and_batch_number_correction(client, supplier_id, pic_id, 
     hist = client.get(f"/api/batches/{rid}/number-history").json()
     assert [h["new_batch_number"] for h in hist] == ["0202024-260918-00"]
     assert client.get(f"/api/batches/{rid}").json()["batch_number"] == "0202024-260918-00"
+
+
+# ---- Fase 44 (koreksi tanggal & pembatalan event historis) ----
+
+def test_api_correct_event_date(client, supplier_id, pic_id, pm_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000"})
+    bid = r.json()["batch"]["batch_id"]
+    qc = client.post("/api/qc-tests", json={
+        "event_date": "2026-09-10", "pic_user_id": pic_id, "batch_id": bid,
+        "stage": "RM", "ka_1": "35.0"})
+    assert qc.status_code == 201, qc.text
+    eid = qc.json()["event_id"]
+
+    body = {"new_event_date": "2026-09-12", "reason": "Salah ketik tanggal"}
+    assert client.post(f"/api/events/{eid}/correct-date", json={**body, "actor_user_id": pic_id}).status_code == 403
+    assert client.post("/api/events/9999/correct-date", json={**body, "actor_user_id": pm_id}).status_code == 404
+    too_early = client.post(f"/api/events/{eid}/correct-date",
+                            json={"new_event_date": "2026-08-01", "reason": "x", "actor_user_id": pm_id})
+    assert too_early.status_code == 422 and too_early.json()["error"] == "event_date_order_error"
+    ok = client.post(f"/api/events/{eid}/correct-date", json={**body, "actor_user_id": pm_id})
+    assert ok.status_code == 201 and ok.json()["old_event_date"] == "2026-09-10"
+    assert client.get(f"/api/process-events?batch_id={bid}").json()[0]["event_date"] == "2026-09-12"
+
+    hist = client.get(f"/api/events/{eid}/history").json()
+    assert [h["kind"] for h in hist] == ["DATE_CORRECTION"]
+    assert client.get("/api/events/9999/history").status_code == 404
+
+
+def test_api_cancel_event_and_correctable_listing(client, supplier_id, pic_id, pm_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "20.000"})
+    bid = r.json()["batch"]["batch_id"]
+    rid = r.json()["event"]["event_id"]
+
+    correctable = client.get("/api/events/correctable", params={"batch_id": bid}).json()
+    assert [e["event_id"] for e in correctable] == [rid]
+
+    s = client.post("/api/sortation", json={
+        "event_date": "2026-09-05", "pic_user_id": pic_id, "batch_id": bid, "gourmet_qty": "20.000"})
+    assert s.status_code in (200, 201), s.text
+
+    # RECEIVING sekarang punya turunan (Sortasi) -> tidak lagi boleh dibatalkan;
+    # Sortasi sendiri belum punya turunan lagi -> masih boleh (satu-satunya di daftar).
+    blocked = client.post(f"/api/events/{rid}/cancel", json={"actor_user_id": pm_id, "reason": "coba batalkan"})
+    assert blocked.status_code == 422
+    sort_eid = client.get(f"/api/process-events?event_type=SORTATION&batch_id={bid}").json()[0]["event_id"]
+    assert [e["event_id"] for e in client.get("/api/events/correctable", params={"batch_id": bid}).json()] == [sort_eid]
+    forbidden = client.post(f"/api/events/{sort_eid}/cancel", json={"actor_user_id": pic_id, "reason": "x"})
+    assert forbidden.status_code == 403
+    done = client.post(f"/api/events/{sort_eid}/cancel", json={"actor_user_id": pm_id, "reason": "Sortasi keliru"})
+    assert done.status_code == 201 and done.json()["event_type"] == "SORTATION"
+    assert client.get(f"/api/process-events?event_type=SORTATION&batch_id={bid}").json()[0]["status"] == "VOID"
+    # Setelah Sortasi dibatalkan, batch Receiving kembali tak bertutunan
+    assert [e["event_id"] for e in client.get("/api/events/correctable", params={"batch_id": bid}).json()] == [rid]

@@ -54,7 +54,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..enums import EventType, LinkRole, TransactionDirection
+from ..enums import EventStatus, EventType, LinkRole, TransactionDirection
 from ..models import Batch, EventBatchLink, ProcessEvent, StockTransaction
 
 ZERO = Decimal("0")
@@ -186,6 +186,8 @@ def sortation_rendemen(session: Session, event_id: int,
         raise ValueError(f"Event {event_id} does not exist.")
     if event.event_type != EventType.SORTATION:
         raise ValueError(f"Event {event_id} is {event.event_type.value}, not SORTATION.")
+    if event.status == EventStatus.VOID:
+        raise ValueError(f"Event {event_id} sudah dibatalkan (VOID) -- Fase 44.")
 
     attr = _attr or _Attribution(session)
     inputs = attr._links(event_id, LinkRole.INPUT)
@@ -228,7 +230,9 @@ def list_sortation_rendemen(
 ) -> list[SortationRendemen]:
     """One row per SORTATION event (the SORT sheet's rows), oldest first.
     `batch_id` keeps sortations whose input OR any output is that batch."""
-    stmt = select(ProcessEvent.event_id).where(ProcessEvent.event_type == EventType.SORTATION)
+    stmt = select(ProcessEvent.event_id).where(
+        ProcessEvent.event_type == EventType.SORTATION, ProcessEvent.status != EventStatus.VOID
+    )
     if date_from is not None:
         stmt = stmt.where(ProcessEvent.event_date >= date_from)
     if date_to is not None:
@@ -280,6 +284,8 @@ def mixing_rendemen(session: Session, event_id: int) -> MixingRendemen:
         raise ValueError(f"Event {event_id} does not exist.")
     if event.event_type != EventType.MIXING:
         raise ValueError(f"Event {event_id} is {event.event_type.value}, not MIXING.")
+    if event.status == EventStatus.VOID:
+        raise ValueError(f"Event {event_id} sudah dibatalkan (VOID) -- Fase 44.")
 
     attr = _Attribution(session)
     inputs = attr._links(event_id, LinkRole.INPUT)
@@ -318,7 +324,9 @@ def list_mixing_rendemen(
 ) -> list[MixingRendemen]:
     """One row per MIXING event, oldest first. `batch_id` keeps mixings whose
     output OR any source is that batch."""
-    stmt = select(ProcessEvent.event_id).where(ProcessEvent.event_type == EventType.MIXING)
+    stmt = select(ProcessEvent.event_id).where(
+        ProcessEvent.event_type == EventType.MIXING, ProcessEvent.status != EventStatus.VOID
+    )
     if date_from is not None:
         stmt = stmt.where(ProcessEvent.event_date >= date_from)
     if date_to is not None:
