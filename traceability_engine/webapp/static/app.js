@@ -75,7 +75,7 @@ let currentUser = null; // Fase 47 -- {user_id, name, role, must_change_password
 // pengecekan `require_actor_matches` di server.
 const ACTOR_LOCKED_SELECT_IDS = [
     'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic',
-    'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic', 'eqPic', 'enPic', 'jcPic',
+    'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic', 'eqPic', 'enPic', 'jcPic', 'slPic',
 ];
 
 function applyCurrentUserToActorFields() {
@@ -196,7 +196,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
         if (page === 'mixing') renderMixingHistory();
         if (page === 'vacuum-packing') { renderVacuumHistory(); renderPackingHistory(); }
         if (page === 'delivery') { renderDeliveryHistory(); renderSampleDeliveryHistory(); renderCustomersTable(); }
-        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderSupplierReturns(); renderAaChain(); renderEventCorrection(); renderJenisBatchOptions(); }
+        if (page === 'adjustment') { renderAuditLog(); renderDisposition(); renderSupplierReturns(); renderAaChain(); renderEventCorrection(); renderJenisBatchOptions(); renderEventBalance(); }
         if (page === 'stock') renderStockSummary();
         if (page === 'batch-history') { renderRendemenSortation(); renderRendemenMixing(); }
     });
@@ -2186,15 +2186,99 @@ document.getElementById('eqForm').addEventListener('submit', async (e) => {
     const picId = document.getElementById('eqPic').value;
     if (!eventId || !linkId || !picId) { toast('Event, link, dan Production Manager harus dipilih.', 'error'); return; }
     try {
-        await api('POST', `/events/${eventId}/correct-quantity`, {
+        const res = await api('POST', `/events/${eventId}/correct-quantity`, {
             link_id: Number(linkId), new_quantity: document.getElementById('eqNewQuantity').value,
             actor_user_id: Number(picId), reason: document.getElementById('eqReason').value.trim(),
         });
-        toast(`✅ Kuantitas event #${eventId} dikoreksi. Stok & StockTransaction disesuaikan otomatis.`, 'success', 8000);
+        const shrinkMsg = res.new_shrinkage_qty != null
+            ? ` Susut ikut disesuaikan: ${fmtQty(res.old_shrinkage_qty)} → ${fmtQty(res.new_shrinkage_qty)}.` : '';
+        toast(`✅ Kuantitas event #${eventId} dikoreksi. Stok & StockTransaction disesuaikan otomatis.${shrinkMsg}`, 'success', 9000);
+        (res.warnings || []).forEach(w => toast(`⚠️ ${w}`, 'error', 10000));
         document.getElementById('eqForm').reset();
-        await renderEventCorrection(); await renderAuditLog();
+        await renderEventCorrection(); await renderAuditLog(); await renderEventBalance();
     } catch (err) { toastError(err, 6000); }
 });
+
+// ─── PINDAH SUSUT <-> LOSS + AUDIT KESEIMBANGAN (Fase 49) ───────────────
+let slTotal = null;
+async function loadShrinkageLoss(eventId) {
+    const cur = document.getElementById('slCurrent');
+    slTotal = null;
+    let ev;
+    try { ev = await api('GET', `/process-events/${eventId}`); }
+    catch (err) { cur.textContent = '—'; toastError(err, 6000); return; }
+    const s = Number(ev.shrinkage_qty), l = Number(ev.loss_qty);
+    slTotal = Math.round((s + l) * 1000) / 1000;
+    cur.textContent = `${ev.event_type} #${ev.event_id}${ev.status === 'VOID' ? ' (VOID)' : ''} — susut ${fmtQty(ev.shrinkage_qty)}, loss ${fmtQty(ev.loss_qty)} (total ${fmtQty(slTotal)})`;
+    document.getElementById('slNewShrinkage').value = ev.shrinkage_qty;
+    document.getElementById('slNewLoss').value = ev.loss_qty;
+}
+document.getElementById('slLoadBtn').addEventListener('click', () => {
+    const id = document.getElementById('slEventId').value;
+    if (!id) { toast('Isi nomor event dulu.', 'error'); return; }
+    loadShrinkageLoss(id);
+});
+document.getElementById('slNewShrinkage').addEventListener('input', () => {
+    if (slTotal == null) return;
+    const s = Number(document.getElementById('slNewShrinkage').value || 0);
+    document.getElementById('slNewLoss').value = (Math.round((slTotal - s) * 1000) / 1000).toFixed(3);
+});
+document.getElementById('slForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventId = document.getElementById('slEventId').value;
+    const picId = document.getElementById('slPic').value;
+    if (!eventId || !picId) { toast('Event dan Production Manager harus diisi.', 'error'); return; }
+    if (slTotal == null) { toast('Klik "Muat" dulu untuk memuat susut/loss saat ini.', 'error'); return; }
+    try {
+        const res = await api('POST', `/events/${eventId}/transfer-shrinkage-loss`, {
+            new_shrinkage_qty: document.getElementById('slNewShrinkage').value,
+            new_loss_qty: document.getElementById('slNewLoss').value,
+            actor_user_id: Number(picId), reason: document.getElementById('slReason').value.trim(),
+        });
+        toast(`✅ Event #${eventId}: susut ${fmtQty(res.old_shrinkage_qty)} → ${fmtQty(res.new_shrinkage_qty)}, loss ${fmtQty(res.old_loss_qty)} → ${fmtQty(res.new_loss_qty)}.`, 'success', 8000);
+        document.getElementById('slReason').value = '';
+        await loadShrinkageLoss(eventId); await renderEventBalance();
+    } catch (err) { toastError(err, 6000); }
+});
+
+async function renderEventBalance() {
+    const tbody = document.getElementById('ebTable');
+    if (!tbody) return;
+    let rows;
+    try { rows = await api('GET', '/audit/event-balance'); }
+    catch (err) { toastError(err, 6000); return; }
+    tbody.innerHTML = rows.length ? rows.map(r => `<tr>
+            <td>${r.event_type} #${r.event_id}</td>
+            <td>${r.event_date}</td>
+            <td>${r.batch_ids.map((id, i) => `#${id} ${r.batch_numbers[i] || ''}`).join(', ')}</td>
+            <td>${fmtQty(r.sum_input)}</td>
+            <td>${fmtQty(r.sum_output)}</td>
+            <td>${fmtQty(r.shrinkage_qty)}</td>
+            <td>${fmtQty(r.loss_qty)}</td>
+            <td><span class="badge badge-warning">${Number(r.difference) > 0 ? '+' : ''}${fmtQty(r.difference)}</span></td>
+            <td>${r.has_downstream
+                ? `<button type="button" class="btn btn-secondary btn-small eb-chain" data-event-id="${r.event_id}">Cek Rantai Blocking</button>`
+                : `<button type="button" class="btn btn-secondary btn-small eb-qty" data-event-id="${r.event_id}">Muat ke Koreksi Kuantitas</button>`}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary)">✅ Semua event seimbang (input = output + susut + loss)</td></tr>';
+    tbody.querySelectorAll('.eb-qty').forEach(btn => btn.addEventListener('click', async () => {
+        const id = btn.dataset.eventId;
+        const qsel = document.getElementById('eqEvent');
+        if (![...qsel.options].some(o => o.value === id)) {
+            qsel.insertAdjacentHTML('afterbegin', `<option value="${id}">Event #${id} (dari audit keseimbangan)</option>`);
+        }
+        qsel.value = id;
+        await renderEventQuantityLinks();
+        document.getElementById('eqNewQuantity').focus();
+        qsel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+    tbody.querySelectorAll('.eb-chain').forEach(btn => btn.addEventListener('click', () => {
+        document.getElementById('eqChainEventId').value = btn.dataset.eventId;
+        document.getElementById('eqChainBtn').click();
+        document.getElementById('eqChainEventId').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+}
+document.getElementById('ebRefreshBtn').addEventListener('click', renderEventBalance);
 
 // ─── RANTAI BLOCKING / CASCADE MANUAL BERTAHAP (Fase 45) ────────────────
 document.getElementById('eqChainBtn').addEventListener('click', async () => {
@@ -2239,7 +2323,7 @@ document.getElementById('ecHistoryBtn').addEventListener('click', async () => {
     let rows;
     try { rows = await api('GET', `/events/${eventId}/history`); }
     catch (err) { toastError(err, 6000); return; }
-    const kindLabel = { DATE_CORRECTION: 'Koreksi Tanggal', QUANTITY_CORRECTION: 'Koreksi Kuantitas', NOTES_CORRECTION: 'Koreksi Catatan', CANCELLATION: 'Pembatalan' };
+    const kindLabel = { DATE_CORRECTION: 'Koreksi Tanggal', QUANTITY_CORRECTION: 'Koreksi Kuantitas', SHRINKAGE_CORRECTION: 'Koreksi Susut/Loss', NOTES_CORRECTION: 'Koreksi Catatan', CANCELLATION: 'Pembatalan' };
     tbody.innerHTML = rows.length ? rows.map(h => `<tr>
             <td>${new Date(h.occurred_at).toLocaleString('id-ID')}</td>
             <td><span class="badge badge-primary">${kindLabel[h.kind] || h.kind}</span></td>

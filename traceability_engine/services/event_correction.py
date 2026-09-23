@@ -105,6 +105,36 @@ Fase 46 -- koreksi catatan (`correct_event_notes`, keputusan user
 hanya untuk event tanpa turunan (`_guard_correctable`, sama dengan Fase
 44/45). Koreksi AA/jenis TIDAK di sini -- AA milik batch, lihat
 `services/jenis_correction.py` (cascade ke turunan, boleh walau ada turunan).
+
+Fase 49 -- koreksi susut/loss + audit keseimbangan (sisa lingkup Fase 45,
+keputusan user 2026-09-23, AskUserQuestion "Fase 49"):
+
+1. **Susut ikut otomatis** saat `correct_event_quantity()` mengubah satu
+   link: link INPUT naik d -> susut naik d; link OUTPUT naik d -> susut
+   turun d (dan sebaliknya). Contoh user: Sundrying 100 -> 80 susut 20,
+   output dikoreksi ke 82 -> susut 18 (100 = 82 + 18). `loss_qty` TIDAK
+   disentuh. Tidak berlaku untuk tipe event yang memang dikecualikan dari
+   rekonsiliasi (RECEIVING, DELIVERY, SAMPLE_DELIVERY, SUPPLIER_RETURN --
+   `_check_reconciliation`, events.py), yang susutnya selalu 0. Karena
+   susut digeser sebesar SELISIH (bukan dihitung ulang dari nol), event yang
+   sudah terlanjur tidak seimbang sebelumnya tetap sama besar
+   ketidakseimbangannya (tidak diperbaiki/diperburuk diam-diam) -- terlihat
+   di laporan audit (poin 3). Jejak: `EventShrinkageCorrection` source
+   `AUTO_QUANTITY`.
+   `[UNCONFIRMED]` susut hasil koreksi yang NEGATIF (output dikoreksi
+   melebihi input, mis. QC self-loop 10 -> 12) TIDAK ditolak -- konsisten
+   dengan `steam_dry.py` #2 yang sejak awal tidak memblokir susut negatif
+   (bobot naik) karena belum ada aturan PT JAS soal itu; API mengembalikan
+   `warnings` supaya PM sadar.
+2. **Pemindahan susut <-> loss** (`transfer_shrinkage_loss`): hanya
+   redistribusi dengan TOTAL tetap (susut 20 -> susut 18 + loss 2), keduanya
+   tidak boleh negatif. Tidak mengubah stok/link mana pun, jadi **boleh
+   walau event sudah punya turunan** (beda dengan koreksi tanggal/
+   kuantitas/catatan). Tetap: PM saja, alasan wajib, event VOID/ADJUSTMENT
+   ditolak. Jejak: `EventShrinkageCorrection` source `TRANSFER`.
+3. **Audit keseimbangan** (`list_unbalanced_events`): laporan saja (tidak
+   memblokir) event non-VOID yang SUM(input) != SUM(output) + susut + loss
+   -- mis. akibat koreksi kuantitas Fase 45 sebelum poin 1 ada.
 """
 from __future__ import annotations
 
@@ -117,14 +147,18 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..enums import AuditAction, EventStatus, EventType, LinkRole, TransactionDirection, UserRole
+from ..enums import (
+    AuditAction, EventStatus, EventType, LinkRole, NO_INPUT_EVENT_TYPES, NO_OUTPUT_EVENT_TYPES,
+    TransactionDirection, UserRole,
+)
 from ..exceptions import (
     EventDateOrderError, InsufficientStockError, InvalidEventStructureError,
     UnauthorizedDispositionError,
 )
 from ..models import (
     AuditLog, Batch, BatchStatus, EventBatchLink, EventCancellation, EventDateCorrection,
-    EventNotesCorrection, EventQuantityCorrection, ProcessEvent, StockTransaction, User,
+    EventNotesCorrection, EventQuantityCorrection, EventShrinkageCorrection, ProcessEvent,
+    StockTransaction, User,
 )
 
 ZERO = Decimal("0")
@@ -338,12 +372,11 @@ def correct_event_quantity(
     dihasilkan ke batch itu (IN bertambah, saldo naik lebih banyak) --
     dan sebaliknya bila kuantitas turun.
 
-    TIDAK menegakkan ulang validasi rekonsiliasi SUM(input)=SUM(output)+
-    susut+loss (`_check_reconciliation`, services/events.py) terhadap link
-    lain pada event yang sama -- ini alat koreksi satu angka yang salah
-    dicatat, bukan pencatatan ulang event (lihat docstring modul, Fase 45
-    poin 1). Menolak bila hasil koreksi membuat `current_quantity` batch
-    negatif (`InsufficientStockError`).
+    Fase 49: `shrinkage_qty` event ikut digeser sebesar selisih supaya
+    SUM(input) = SUM(output) + susut + loss tetap seimbang (lihat docstring
+    modul, Fase 49 poin 1) -- jejaknya `EventShrinkageCorrection` source
+    `AUTO_QUANTITY` (`shrinkage_change_for()`). Menolak bila hasil koreksi
+    membuat `current_quantity` batch negatif (`InsufficientStockError`).
     """
     _require_manager(session, actor_user_id, "mengoreksi kuantitas event historis")
     if not reason or not reason.strip():
@@ -403,8 +436,178 @@ def correct_event_quantity(
         before_value=f"{link.role.value} qty {old_quantity} (batch {batch.batch_id})",
         after_value=f"{link.role.value} qty {new_quantity} (koreksi: {reason.strip()})",
     ))
+    session.flush()  # entry.correction_id
+
+    # Fase 49 poin 1 -- susut ikut menyesuaikan (bukan untuk tipe yang
+    # dikecualikan dari rekonsiliasi; susut mereka selalu 0).
+    if _is_reconciled_type(event.event_type):
+        shrink_delta = delta if link.role == LinkRole.INPUT else -delta
+        old_shrink = event.shrinkage_qty or ZERO
+        new_shrink = old_shrink + shrink_delta
+        event.shrinkage_qty = new_shrink
+        session.add(EventShrinkageCorrection(
+            event_id=event_id, source=SHRINKAGE_SOURCE_AUTO, quantity_correction_id=entry.correction_id,
+            old_shrinkage_qty=old_shrink, new_shrinkage_qty=new_shrink,
+            old_loss_qty=event.loss_qty or ZERO, new_loss_qty=event.loss_qty or ZERO,
+            reason=reason.strip(), actor_user_id=actor_user_id,
+        ))
+        session.add(AuditLog(
+            entity_type="ProcessEvent", entity_id=event_id, action=AuditAction.UPDATE,
+            actor_user_id=actor_user_id,
+            before_value=f"susut {old_shrink}",
+            after_value=f"susut {new_shrink} (otomatis ikut koreksi kuantitas: {reason.strip()})",
+        ))
+        session.flush()
+    return entry
+
+
+SHRINKAGE_SOURCE_AUTO = "AUTO_QUANTITY"
+SHRINKAGE_SOURCE_TRANSFER = "TRANSFER"
+
+
+def _is_reconciled_type(event_type: EventType) -> bool:
+    """Tipe event yang tunduk pada SUM(input)=SUM(output)+susut+loss
+    (`_check_reconciliation`, events.py) -- RECEIVING/DELIVERY/
+    SAMPLE_DELIVERY/SUPPLIER_RETURN dikecualikan, ADJUSTMENT jalurnya sendiri."""
+    return (
+        event_type not in NO_INPUT_EVENT_TYPES
+        and event_type not in NO_OUTPUT_EVENT_TYPES
+        and event_type != EventType.ADJUSTMENT
+    )
+
+
+def shrinkage_change_for(
+    session: Session, quantity_correction_id: int
+) -> Optional[EventShrinkageCorrection]:
+    """Perubahan susut otomatis yang dipicu satu koreksi kuantitas (None bila
+    tipe event-nya tidak direkonsiliasi)."""
+    return session.execute(
+        select(EventShrinkageCorrection).where(
+            EventShrinkageCorrection.quantity_correction_id == quantity_correction_id
+        )
+    ).scalar_one_or_none()
+
+
+def transfer_shrinkage_loss(
+    session: Session,
+    *,
+    event_id: int,
+    new_shrinkage_qty: Decimal,
+    new_loss_qty: Decimal,
+    actor_user_id: int,
+    reason: str,
+) -> EventShrinkageCorrection:
+    """Fase 49 poin 2 -- pindahkan angka antara susut dan loss pada event
+    historis dengan TOTAL tetap (susut + loss lama == susut + loss baru).
+    Tidak mengubah stok/link, jadi TIDAK memakai `_guard_correctable`
+    (boleh walau event sudah punya turunan); tetap PM saja, alasan wajib,
+    event VOID/ADJUSTMENT/tipe tanpa rekonsiliasi ditolak."""
+    _require_manager(session, actor_user_id, "mengoreksi susut/loss event historis")
+    if not reason or not reason.strip():
+        raise InvalidEventStructureError("Alasan koreksi susut/loss wajib diisi.")
+    event = session.get(ProcessEvent, event_id)
+    if event is None:
+        raise InvalidEventStructureError(f"Event {event_id} tidak ditemukan.")
+    if event.status == EventStatus.VOID:
+        raise InvalidEventStructureError(
+            f"Event {event_id} sudah dibatalkan (VOID); susut/loss-nya tidak bisa dikoreksi."
+        )
+    if not _is_reconciled_type(event.event_type):
+        raise InvalidEventStructureError(
+            f"Event {event.event_type.value} tidak punya susut/loss (dikecualikan dari rekonsiliasi)."
+        )
+    if new_shrinkage_qty < ZERO or new_loss_qty < ZERO:
+        raise InvalidEventStructureError("Susut dan loss baru tidak boleh negatif.")
+
+    old_shrink = event.shrinkage_qty or ZERO
+    old_loss = event.loss_qty or ZERO
+    old_total = old_shrink + old_loss
+    new_total = new_shrinkage_qty + new_loss_qty
+    if new_total != old_total:
+        raise InvalidEventStructureError(
+            f"Total susut + loss harus tetap {old_total} (sekarang susut {old_shrink} + loss "
+            f"{old_loss}); isian baru berjumlah {new_total}. Pemindahan susut<->loss tidak "
+            "mengubah total -- untuk mengubah kuantitas masuk/keluar pakai Koreksi Kuantitas."
+        )
+    if new_shrinkage_qty == old_shrink:
+        raise InvalidEventStructureError("Susut/loss baru sama dengan yang tercatat saat ini.")
+
+    event.shrinkage_qty = new_shrinkage_qty
+    event.loss_qty = new_loss_qty
+    entry = EventShrinkageCorrection(
+        event_id=event_id, source=SHRINKAGE_SOURCE_TRANSFER, quantity_correction_id=None,
+        old_shrinkage_qty=old_shrink, new_shrinkage_qty=new_shrinkage_qty,
+        old_loss_qty=old_loss, new_loss_qty=new_loss_qty,
+        reason=reason.strip(), actor_user_id=actor_user_id,
+    )
+    session.add(entry)
+    session.add(AuditLog(
+        entity_type="ProcessEvent", entity_id=event_id, action=AuditAction.UPDATE,
+        actor_user_id=actor_user_id,
+        before_value=f"susut {old_shrink} loss {old_loss}",
+        after_value=f"susut {new_shrinkage_qty} loss {new_loss_qty} (koreksi: {reason.strip()})",
+    ))
     session.flush()
     return entry
+
+
+@dataclass
+class UnbalancedEventRow:
+    event_id: int
+    event_type: str
+    event_date: dt.date
+    batch_ids: list[int]
+    batch_numbers: list[Optional[str]]
+    sum_input: Decimal
+    sum_output: Decimal
+    shrinkage_qty: Decimal
+    loss_qty: Decimal
+    difference: Decimal  # SUM(input) - (SUM(output) + susut + loss); >0 = ada yang "hilang" tak tercatat
+    has_downstream: bool
+
+
+def list_unbalanced_events(
+    session: Session, *, batch_id: Optional[int] = None
+) -> list[UnbalancedEventRow]:
+    """Fase 49 poin 3 -- laporan (tidak memblokir) event non-VOID yang
+    SUM(input) != SUM(output) + susut + loss. Terbaru (event_id) dulu."""
+    # Dijumlah di Python (Decimal) dari baris link, bukan SUM() SQL --
+    # SQLite mengembalikan float untuk SUM Numeric sehingga perbandingan
+    # "== 0" bisa meleset karena pembulatan biner.
+    stmt = (
+        select(ProcessEvent, EventBatchLink.role, EventBatchLink.quantity)
+        .join(EventBatchLink, EventBatchLink.event_id == ProcessEvent.event_id)
+        .where(ProcessEvent.status != EventStatus.VOID)
+    )
+    if batch_id is not None:
+        ev_ids = select(EventBatchLink.event_id).where(EventBatchLink.batch_id == batch_id)
+        stmt = stmt.where(ProcessEvent.event_id.in_(ev_ids))
+
+    sums: dict[int, list] = {}
+    for event, role, qty in session.execute(stmt).all():
+        if not _is_reconciled_type(event.event_type):
+            continue
+        acc = sums.setdefault(event.event_id, [event, ZERO, ZERO])
+        if role == LinkRole.INPUT:
+            acc[1] += qty
+        else:
+            acc[2] += qty
+
+    rows: list[UnbalancedEventRow] = []
+    for event_id in sorted(sums, reverse=True):
+        event, s_in, s_out = sums[event_id]
+        shrink, loss = event.shrinkage_qty or ZERO, event.loss_qty or ZERO
+        diff = s_in - (s_out + shrink + loss)
+        if diff == ZERO:
+            continue
+        base = _event_row(session, event)
+        rows.append(UnbalancedEventRow(
+            event_id=event.event_id, event_type=event.event_type.value, event_date=event.event_date,
+            batch_ids=base.batch_ids, batch_numbers=base.batch_numbers,
+            sum_input=s_in, sum_output=s_out, shrinkage_qty=shrink, loss_qty=loss,
+            difference=diff, has_downstream=bool(_downstream_event_ids(session, event)),
+        ))
+    return rows
 
 
 def _json_kind(text: Optional[str]) -> Optional[str]:
@@ -613,7 +816,7 @@ def get_blocking_chain(session: Session, *, event_id: int) -> BlockingChainResul
 
 @dataclass
 class EventHistoryEntry:
-    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION | NOTES_CORRECTION
+    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION | SHRINKAGE_CORRECTION | NOTES_CORRECTION
     occurred_at: dt.datetime
     actor_user_id: int
     reason: str
@@ -621,7 +824,7 @@ class EventHistoryEntry:
 
 
 def list_event_correction_history(session: Session, *, event_id: int) -> list[EventHistoryEntry]:
-    """Gabungan riwayat koreksi tanggal + kuantitas + catatan + pembatalan satu event, terlama dulu."""
+    """Gabungan riwayat koreksi tanggal + kuantitas + susut/loss + catatan + pembatalan satu event, terlama dulu."""
     entries: list[EventHistoryEntry] = []
     for c in session.execute(
         select(EventDateCorrection).where(EventDateCorrection.event_id == event_id)
@@ -638,6 +841,17 @@ def list_event_correction_history(session: Session, *, event_id: int) -> list[Ev
         entries.append(EventHistoryEntry(
             kind="QUANTITY_CORRECTION", occurred_at=c.corrected_at, actor_user_id=c.actor_user_id,
             reason=c.reason, detail=f"{c.role} batch #{c.batch_id}: {c.old_quantity} -> {c.new_quantity}",
+        ))
+    for c in session.execute(
+        select(EventShrinkageCorrection).where(EventShrinkageCorrection.event_id == event_id)
+        .order_by(EventShrinkageCorrection.correction_id)
+    ).scalars():
+        how = "otomatis ikut koreksi kuantitas" if c.source == SHRINKAGE_SOURCE_AUTO else "pindah susut/loss"
+        entries.append(EventHistoryEntry(
+            kind="SHRINKAGE_CORRECTION", occurred_at=c.corrected_at, actor_user_id=c.actor_user_id,
+            reason=c.reason,
+            detail=(f"susut {c.old_shrinkage_qty} -> {c.new_shrinkage_qty}, "
+                    f"loss {c.old_loss_qty} -> {c.new_loss_qty} ({how})"),
         ))
     for c in session.execute(
         select(EventNotesCorrection).where(EventNotesCorrection.event_id == event_id)

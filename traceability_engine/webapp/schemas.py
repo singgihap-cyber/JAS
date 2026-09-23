@@ -981,7 +981,7 @@ class EventCancellationOut(BaseModel):
 class EventHistoryOut(BaseModel):
     """Mirrors services/event_correction.py `EventHistoryEntry` field-for-field."""
 
-    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION | NOTES_CORRECTION
+    kind: str  # DATE_CORRECTION | CANCELLATION | QUANTITY_CORRECTION | SHRINKAGE_CORRECTION | NOTES_CORRECTION
     occurred_at: dt.datetime
     actor_user_id: int
     reason: str
@@ -1018,6 +1018,11 @@ class EventQuantityCorrectionOut(BaseModel):
     reason: str
     actor_user_id: int
     corrected_at: Optional[dt.datetime] = None
+    # Fase 49 -- susut yang ikut menyesuaikan otomatis (None bila tipe event
+    # tidak direkonsiliasi, mis. RECEIVING/DELIVERY).
+    old_shrinkage_qty: Optional[Decimal] = None
+    new_shrinkage_qty: Optional[Decimal] = None
+    warnings: list[str] = []
 
     model_config = {"from_attributes": True}
 
@@ -1028,6 +1033,46 @@ class BlockingChainOut(BaseModel):
     event_id: int
     blocked: bool
     chain: list[CorrectableEventOut]
+
+
+# ------------------------------------------- koreksi susut/loss + audit keseimbangan (Fase 49)
+class ShrinkageTransferIn(BaseModel):
+    new_shrinkage_qty: Decimal
+    new_loss_qty: Decimal
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+
+
+class ShrinkageCorrectionOut(BaseModel):
+    correction_id: int
+    event_id: int
+    source: str  # AUTO_QUANTITY | TRANSFER
+    quantity_correction_id: Optional[int] = None
+    old_shrinkage_qty: Decimal
+    new_shrinkage_qty: Decimal
+    old_loss_qty: Decimal
+    new_loss_qty: Decimal
+    reason: str
+    actor_user_id: int
+    corrected_at: Optional[dt.datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class UnbalancedEventOut(BaseModel):
+    """Mirrors services/event_correction.py `UnbalancedEventRow` field-for-field."""
+
+    event_id: int
+    event_type: str
+    event_date: dt.date
+    batch_ids: list[int]
+    batch_numbers: list[Optional[str]]
+    sum_input: Decimal
+    sum_output: Decimal
+    shrinkage_qty: Decimal
+    loss_qty: Decimal
+    difference: Decimal
+    has_downstream: bool
 
 
 # ------------------------------------------- koreksi catatan + jenis/cascade (Fase 46)

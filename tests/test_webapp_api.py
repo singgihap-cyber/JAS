@@ -2320,3 +2320,67 @@ def test_api_correct_event_notes(client, supplier_id, pic_id, pm_id):
     rows = {e["event_id"]: e for e in client.get("/api/events/correctable").json()}
     assert rows[rid]["notes"] == new_notes
     assert [h["kind"] for h in client.get(f"/api/events/{rid}/history").json()] == ["NOTES_CORRECTION"]
+
+
+# ---- Fase 49 (koreksi susut/loss + audit keseimbangan) ----
+
+def _api_sundried(client, supplier_id, pic_id):
+    r = client.post("/api/receiving", json={
+        "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
+        "batch_type": "RAW_KERING", "net_quantity": "100.000"})
+    bid = r.json()["batch"]["batch_id"]
+    sd = client.post("/api/sundrying", json={
+        "event_date": "2026-09-03", "pic_user_id": pic_id, "batch_id": bid,
+        "starting_quantity": "100.000", "final_quantity": "80.000"})
+    assert sd.status_code in (200, 201), sd.text
+    eid = client.get(f"/api/process-events?event_type=SUNDRYING&batch_id={bid}").json()[0]["event_id"]
+    return bid, eid
+
+
+def test_api_quantity_correction_returns_auto_shrinkage(client, supplier_id, pic_id, pm_id):
+    bid, eid = _api_sundried(client, supplier_id, pic_id)
+    out_link = next(l for l in client.get(f"/api/events/{eid}/links").json() if l["role"] == "OUTPUT")
+    client.login_as(pm_id)
+    ok = client.post(f"/api/events/{eid}/correct-quantity", json={
+        "link_id": out_link["link_id"], "new_quantity": "82.000", "actor_user_id": pm_id,
+        "reason": "Hasil jemur salah timbang"})
+    assert ok.status_code == 201, ok.text
+    body = ok.json()
+    assert body["old_shrinkage_qty"] == "20.000" and body["new_shrinkage_qty"] == "18.000"
+    assert body["warnings"] == []
+    hist = client.get(f"/api/events/{eid}/history").json()
+    assert [h["kind"] for h in hist] == ["QUANTITY_CORRECTION", "SHRINKAGE_CORRECTION"]
+
+    neg = client.post(f"/api/events/{eid}/correct-quantity", json={
+        "link_id": out_link["link_id"], "new_quantity": "105.000", "actor_user_id": pm_id, "reason": "coba"})
+    assert neg.status_code == 201 and neg.json()["new_shrinkage_qty"] == "-5.000"
+    assert "negatif" in neg.json()["warnings"][0]
+    assert client.get("/api/audit/event-balance").json() == []
+
+
+def test_api_transfer_shrinkage_loss_and_balance_audit(client, supplier_id, pic_id, pm_id):
+    bid, eid = _api_sundried(client, supplier_id, pic_id)
+    body = {"new_shrinkage_qty": "18.000", "new_loss_qty": "2.000", "reason": "2 kg tercecer"}
+    client.login_as(pic_id)
+    assert client.post(f"/api/events/{eid}/transfer-shrinkage-loss",
+                       json={**body, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm_id)
+    assert client.post("/api/events/9999/transfer-shrinkage-loss",
+                       json={**body, "actor_user_id": pm_id}).status_code == 404
+    bad = client.post(f"/api/events/{eid}/transfer-shrinkage-loss",
+                      json={**body, "new_loss_qty": "5.000", "actor_user_id": pm_id})
+    assert bad.status_code == 422 and "Total susut" in bad.text
+    ok = client.post(f"/api/events/{eid}/transfer-shrinkage-loss", json={**body, "actor_user_id": pm_id})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["source"] == "TRANSFER" and ok.json()["new_loss_qty"] == "2.000"
+    ev = next(e for e in client.get(f"/api/process-events?event_type=SUNDRYING&batch_id={bid}").json())
+    assert ev["shrinkage_qty"] == "18.000" and ev["loss_qty"] == "2.000"
+    assert client.get("/api/audit/event-balance").json() == []
+    assert client.get("/api/audit/event-balance", params={"batch_id": bid}).json() == []
+
+
+def test_api_get_single_process_event(client, supplier_id, pic_id):
+    bid, eid = _api_sundried(client, supplier_id, pic_id)
+    r = client.get(f"/api/process-events/{eid}")
+    assert r.status_code == 200 and r.json()["event_id"] == eid and r.json()["shrinkage_qty"] == "20.000"
+    assert client.get("/api/process-events/9999").status_code == 404

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from ...models import ProcessEvent, User
 from ...services.event_correction import (
     cancel_event, correct_event_date, correct_event_notes, correct_event_quantity, get_blocking_chain,
-    list_correctable_events, list_event_correction_history, list_event_links,
+    list_correctable_events, list_event_correction_history, list_event_links, list_unbalanced_events,
+    shrinkage_change_for, transfer_shrinkage_loss,
 )
 from ..database import get_db
 from ..dependencies import get_current_user, require_actor_matches
@@ -19,7 +20,7 @@ from ..schemas import (
     BlockingChainOut, CorrectableEventOut, EventCancelIn, EventCancellationOut,
     EventDateCorrectionIn, EventDateCorrectionOut, EventHistoryOut, EventLinkOut,
     EventNotesCorrectionIn, EventNotesCorrectionOut, EventQuantityCorrectionIn,
-    EventQuantityCorrectionOut,
+    EventQuantityCorrectionOut, ShrinkageCorrectionOut, ShrinkageTransferIn, UnbalancedEventOut,
 )
 
 router = APIRouter(tags=["event-correction"])
@@ -100,7 +101,17 @@ def correct_event_quantity_endpoint(
         actor_user_id=payload.actor_user_id, reason=payload.reason,
     )
     db.flush()
-    return entry
+    out = EventQuantityCorrectionOut.model_validate(entry)
+    change = shrinkage_change_for(db, entry.correction_id)  # Fase 49
+    if change is not None:
+        out.old_shrinkage_qty = change.old_shrinkage_qty
+        out.new_shrinkage_qty = change.new_shrinkage_qty
+        if change.new_shrinkage_qty < 0:
+            out.warnings.append(
+                f"Susut event jadi negatif ({change.new_shrinkage_qty}): output melebihi input. "
+                "Periksa apakah kuantitas INPUT juga perlu dikoreksi."
+            )
+    return out
 
 
 @router.get("/events/{event_id}/blocking-chain", response_model=BlockingChainOut)
@@ -130,3 +141,32 @@ def correct_event_notes_endpoint(
     )
     db.flush()
     return entry
+
+
+@router.post(
+    "/events/{event_id}/transfer-shrinkage-loss", response_model=ShrinkageCorrectionOut, status_code=201
+)
+def transfer_shrinkage_loss_endpoint(
+    event_id: int,
+    payload: ShrinkageTransferIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fase 49 -- pindahkan susut <-> loss (total tetap, PM, alasan wajib,
+    boleh walau event sudah punya turunan karena stok tidak berubah)."""
+    require_actor_matches(payload.actor_user_id, current_user)
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    entry = transfer_shrinkage_loss(
+        db, event_id=event_id, new_shrinkage_qty=payload.new_shrinkage_qty,
+        new_loss_qty=payload.new_loss_qty, actor_user_id=payload.actor_user_id, reason=payload.reason,
+    )
+    db.flush()
+    return entry
+
+
+@router.get("/audit/event-balance", response_model=list[UnbalancedEventOut])
+def get_unbalanced_events(batch_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Fase 49 -- laporan event non-VOID yang SUM(input) != SUM(output) +
+    susut + loss (tidak memblokir apa pun)."""
+    return list_unbalanced_events(db, batch_id=batch_id)

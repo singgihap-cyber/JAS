@@ -1113,8 +1113,9 @@
                     Backlog sejak Fase 42 (mis. event MD 15/6 pada batch <code>030218-260618-00</code> yang sampai
                     sekarang hanya dibiarkan sebagai catatan historis, Fase 23/28/37). Hanya <b>Production Manager</b>,
                     alasan wajib. Lingkup koreksi: tanggal event (<code>event_date</code>) dan — sejak Fase 45 —
-                    kuantitas satu link INPUT/OUTPUT (StockTransaction &amp; stok batch disesuaikan otomatis); Jenis
-                    (AA) dan catatan tetap di luar lingkup. Pembatalan menandai event <b>VOID</b> (jejak tetap tersimpan,
+                    kuantitas satu link INPUT/OUTPUT (StockTransaction &amp; stok batch disesuaikan otomatis; sejak
+                    Fase 49 <b>susut event ikut menyesuaikan otomatis</b> supaya input = output + susut + loss tetap
+                    seimbang, mis. Sundrying 100 → 80 susut 20, output dikoreksi 82 → susut 18). Pembatalan menandai event <b>VOID</b> (jejak tetap tersimpan,
                     tidak dihapus); efek stoknya dibalik otomatis. Ketiganya <b>hanya berlaku untuk event yang belum
                     punya event/batch turunan setelahnya</b> pada batch yang sama, supaya rute turunan tidak jadi tidak
                     konsisten — pilih batch (opsional) lalu muat daftar event yang masih boleh dikoreksi/dibatalkan.
@@ -1196,6 +1197,59 @@
                     </div>
                     <button type="submit" class="btn btn-primary">Koreksi Kuantitas</button>
                 </form>
+
+                <div class="form-divider">🔀 Pindah susut ↔ loss (Fase 49)</div>
+                <div class="info-box">
+                    Memindahkan angka antara <b>susut</b> dan <b>loss</b> pada satu event dengan <b>total tetap</b>
+                    (mis. susut 20 → susut 18 + loss 2). Stok batch tidak berubah, jadi boleh walau event sudah punya
+                    turunan. Untuk mengubah kuantitas masuk/keluar pakai Koreksi Kuantitas di atas.
+                </div>
+                <form id="slForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">
+                    <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0">
+                        <label class="form-label">Event #</label>
+                        <input class="form-input" id="slEventId" type="number" min="1" required>
+                    </div>
+                    <button type="button" class="btn btn-secondary" id="slLoadBtn">Muat</button>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Saat ini</label>
+                        <div id="slCurrent" class="form-input" style="background:transparent">—</div>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0">
+                        <label class="form-label">Susut baru</label>
+                        <input type="number" step="0.001" min="0" class="form-input" id="slNewShrinkage" required>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0">
+                        <label class="form-label">Loss baru (otomatis = total − susut)</label>
+                        <input type="number" step="0.001" min="0" class="form-input" id="slNewLoss" readonly>
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:150px;margin-bottom:0">
+                        <label class="form-label">Oleh (Production Manager)</label>
+                        <select class="form-select" id="slPic" required></select>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:200px;margin-bottom:0">
+                        <label class="form-label">Alasan</label>
+                        <input class="form-input" id="slReason" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Pindahkan</button>
+                </form>
+
+                <div class="form-divider">⚖️ Audit: event tidak seimbang (Fase 49)</div>
+                <div class="info-box">
+                    Laporan saja (tidak memblokir): event yang jumlah input ≠ output + susut + loss — biasanya akibat
+                    koreksi kuantitas sebelum Fase 49. Selisih positif = ada kuantitas masuk yang tidak tercatat sebagai
+                    output/susut/loss; negatif = sebaliknya.
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="align-self:end">
+                        <button type="button" class="btn btn-secondary" id="ebRefreshBtn">🔄 Periksa Keseimbangan</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Event</th><th>Tanggal</th><th>Batch</th><th>Input</th><th>Output</th><th>Susut</th><th>Loss</th><th>Selisih</th><th></th></tr></thead>
+                        <tbody id="ebTable"></tbody>
+                    </table>
+                </div>
 
                 <div class="form-divider">📝 Koreksi catatan event (Fase 46)</div>
                 <form id="enForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:10px">

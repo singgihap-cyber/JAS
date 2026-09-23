@@ -81,6 +81,16 @@ def list_process_events(
     return [event_to_out(db, e) for e in events]
 
 
+@router.get("/process-events/{event_id}", response_model=ProcessEventOut)
+def get_process_event(event_id: int, db: Session = Depends(get_db)):
+    """Fase 49 -- satu event (dipakai form pindah susut<->loss untuk memuat
+    susut/loss saat ini dari nomor event, termasuk event yang sudah punya turunan)."""
+    event = db.get(ProcessEvent, event_id)
+    if event is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    return event_to_out(db, event)
+
+
 @router.get("/batch-number/preview")
 def preview_batch_number(
     jenis_code: str = Query(...),

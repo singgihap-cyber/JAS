@@ -404,10 +404,9 @@ class EventQuantityCorrection(Base):
     Koreksi OTOMATIS menyesuaikan `StockTransaction` (baris kompensasi
     delta, bukan edit/hapus baris lama) dan `Batch.current_quantity` --
     lihat `correct_event_quantity()`. Berlaku generik untuk semua tipe
-    event (keputusan user 2026-09-22); TIDAK menegakkan ulang validasi
-    rekonsiliasi SUM(input)=SUM(output)+susut+loss lintas link lain event
-    yang sama -- di luar lingkup fase ini (lihat docstring
-    `correct_event_quantity`)."""
+    event (keputusan user 2026-09-22). Fase 49: susut event ikut
+    menyesuaikan otomatis supaya event tetap seimbang -- jejaknya di
+    `EventShrinkageCorrection` (source AUTO_QUANTITY)."""
 
     __tablename__ = "event_quantity_corrections"
 
@@ -418,6 +417,39 @@ class EventQuantityCorrection(Base):
     role: Mapped[str] = mapped_column(String(10))  # INPUT | OUTPUT
     old_quantity: Mapped[Decimal] = mapped_column(QTY)
     new_quantity: Mapped[Decimal] = mapped_column(QTY)
+    reason: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class EventShrinkageCorrection(Base):
+    """Fase 49 -- riwayat perubahan `ProcessEvent.shrinkage_qty`/`loss_qty`
+    pada event historis. Dua sumber (`source`):
+
+    - `AUTO_QUANTITY`: susut ikut menyesuaikan OTOMATIS saat kuantitas satu
+      link dikoreksi lewat `correct_event_quantity()` (keputusan user
+      2026-09-23), supaya SUM(input) = SUM(output) + susut + loss tetap
+      seimbang. `quantity_correction_id` menunjuk baris
+      `EventQuantityCorrection` pemicunya; `reason` = alasan koreksi itu.
+    - `TRANSFER`: pemindahan manual susut <-> loss dengan TOTAL tetap
+      (`transfer_shrinkage_loss()`) -- tidak mengubah stok, jadi boleh
+      walau event sudah punya turunan (keputusan user 2026-09-23).
+
+    Tabel baru (bukan kolom tambahan di `event_quantity_corrections`)
+    supaya DB produksi cukup `create_all`, tanpa ALTER."""
+
+    __tablename__ = "event_shrinkage_corrections"
+
+    correction_id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
+    source: Mapped[str] = mapped_column(String(20))  # AUTO_QUANTITY | TRANSFER
+    quantity_correction_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("event_quantity_corrections.correction_id"), nullable=True, index=True
+    )
+    old_shrinkage_qty: Mapped[Decimal] = mapped_column(QTY)
+    new_shrinkage_qty: Mapped[Decimal] = mapped_column(QTY)
+    old_loss_qty: Mapped[Decimal] = mapped_column(QTY)
+    new_loss_qty: Mapped[Decimal] = mapped_column(QTY)
     reason: Mapped[str] = mapped_column(Text)
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
