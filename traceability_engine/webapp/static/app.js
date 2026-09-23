@@ -732,7 +732,7 @@ const STAGE_DEFS = [
             },
         ],
         derivedPreview: true,
-        historyCols: ['shrinkage_qty', 'outputs'],
+        historyCols: ['end_date', 'shrinkage_qty', 'outputs'],
     },
     {
         key: 'grinding', label: '⚙️ Grinding & Sieving (NC → Powder)', endpoint: '/grinding',
@@ -972,6 +972,13 @@ async function renderProsesHistory() {
                 return outs.length ? outs.map(l => `#${l.batch_id} (${fmtQty(l.quantity)})`).join(', ') : '–';
             }
             if (ev.quality_test && col in ev.quality_test) return ev.quality_test[col] ?? '–';
+            if (col === 'end_date') {
+                // Fase 48: kolom resmi untuk event baru; event Sortasi lama
+                // (sebelum Fase 48) masih menyimpannya di notes JSON.
+                if (ev.end_date) return ev.end_date;
+                const legacyNotes = ev.notes ? safeParse(ev.notes) : {};
+                return legacyNotes.end_date ?? '–';
+            }
             const notes = ev.notes ? safeParse(ev.notes) : {};
             return notes[col] ?? '–';
         };

@@ -1,5 +1,4 @@
 import datetime as dt
-import json
 from decimal import Decimal
 
 import pytest
@@ -89,8 +88,10 @@ def test_sortation_splits_into_grade_breakdown(session, staff_user, supplier):
         else:
             assert b.batch_type == BatchType.PROCESSED
 
-    notes = json.loads(event.notes)
-    assert notes["end_date"] == TODAY.isoformat()
+    # Fase 48: end_date sekarang kolom resmi ProcessEvent.end_date, bukan
+    # lagi disisipkan ke notes (sortation.py docstring #8).
+    assert event.end_date == TODAY
+    assert event.notes is None
 
 
 def test_sortation_omits_grades_left_unset(session, staff_user, supplier):

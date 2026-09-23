@@ -2021,6 +2021,13 @@ def test_api_sortation_start_required_and_order(client, supplier_id, pic_id):
     assert bad.status_code == 422 and "MULAI" in bad.text
     ok = client.post("/api/sortation", json={**base, "event_date": "2026-06-15", "end_date": "2026-06-18"})
     assert ok.status_code == 201, ok.text
+    # Fase 48: end_date sekarang kolom resmi ProcessEvent.end_date, dikembalikan
+    # langsung di response event -- bukan lagi harus di-parse dari notes.
+    assert ok.json()["event"]["end_date"] == "2026-06-18"
+    assert ok.json()["event"]["notes"] is None
+    eid = ok.json()["event"]["event_id"]
+    fetched = client.get(f"/api/process-events?batch_id={bid}").json()
+    assert any(e["event_id"] == eid and e["end_date"] == "2026-06-18" for e in fetched)
 
 
 def test_api_supplier_return_reminders(client, supplier_id, pic_id):

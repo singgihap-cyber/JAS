@@ -107,7 +107,14 @@ ambiguity instead of guessing):
    single `event_date` (mapped here to SORT's "start date", consistent
    with every other phase using `event_date` for the activity date); "end
    date" is recorded in `notes` instead, the same treatment as Steaming's
-   "end time" (Fase 6 #5).
+   "end time" (Fase 6 #5). **Superseded by Fase 48**: `ProcessEvent` now
+   has a real nullable `end_date` column (models.py); `record_sortation()`
+   passes `data.end_date` straight through to `record_process_event()`
+   instead of encoding it into `notes`. Historical Sortation events whose
+   end_date is still embedded in `notes` as JSON are NOT migrated
+   (keputusan user 2026-09-23) -- they keep reading from `notes` as
+   before; only new/future Sortation events populate the column. Steaming's
+   "end time" is unaffected (out of scope for this fase).
 
 10. **[Fase 38] Tanggal MULAI sortasi WAJIB.** Keputusan user 2026-09-21:
     berlaku untuk semua sortasi baru via API dan UI (tidak ada jalur
@@ -122,7 +129,6 @@ ambiguity instead of guessing):
 from __future__ import annotations
 
 import datetime as dt
-import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
@@ -173,7 +179,7 @@ class SortationInput:
     initial_qty: Optional[Decimal] = None  # SORT "initial qty" -- default batch on-hand (#7)
     unit: str = "kg"
     event_time: Optional[dt.time] = None
-    end_date: Optional[dt.date] = None  # SORT "end date" -- notes only, see #8
+    end_date: Optional[dt.date] = None  # SORT "end date" -- kolom resmi ProcessEvent.end_date, lihat #8
     gourmet_qty: Optional[Decimal] = None
     eg_qty: Optional[Decimal] = None
     ep_qty: Optional[Decimal] = None
@@ -199,12 +205,6 @@ class SortationInput:
     # `jenis_code` (01/02) opsional: mengganti AA batch sumber (mis. AA lama).
     auto_batch_number: bool = False
     jenis_code: Optional[str] = None
-
-
-def _sort_notes(data: SortationInput) -> Optional[str]:
-    if data.end_date is None:
-        return None
-    return json.dumps({"end_date": data.end_date.isoformat()}, ensure_ascii=False)
 
 
 _BATCH_NUMBER_ATTR = {
@@ -324,5 +324,5 @@ def record_sortation(session: Session, data: SortationInput) -> ProcessEvent:
         inputs=[InputSpec(batch_id=data.batch_id, quantity=initial_qty, unit=data.unit)],
         outputs=outputs,
         shrinkage_qty=shrinkage_qty,
-        notes=_sort_notes(data),
+        end_date=data.end_date,  # Fase 48 -- kolom resmi, bukan lagi lewat notes (docstring #8)
     )

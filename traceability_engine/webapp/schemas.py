@@ -157,6 +157,7 @@ class ProcessEventOut(BaseModel):
     shrinkage_qty: Decimal
     loss_qty: Decimal
     notes: Optional[str] = None
+    end_date: Optional[dt.date] = None  # Fase 48 -- diisi Sortation (services/sortation.py #8); event lain NULL
     status: str
     created_at: dt.datetime
     links: list[EventBatchLinkOut] = []
@@ -360,7 +361,7 @@ class SortationCreate(BaseModel):
     batch_id: int
     initial_qty: Optional[Decimal] = None  # default: batch on-hand -- services/sortation.py #7
     unit: str = "kg"
-    end_date: Optional[dt.date] = None  # SORT "end date" -- notes only, sortation.py #8
+    end_date: Optional[dt.date] = None  # SORT "end date" -- kolom resmi ProcessEvent.end_date, sortation.py #8
     gourmet_qty: Optional[Decimal] = None
     eg_qty: Optional[Decimal] = None
     ep_qty: Optional[Decimal] = None

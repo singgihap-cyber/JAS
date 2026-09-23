@@ -153,6 +153,7 @@ def record_process_event(
     shrinkage_qty: Decimal = ZERO,
     loss_qty: Decimal = ZERO,
     notes: Optional[str] = None,
+    end_date: Optional[dt.date] = None,  # Fase 48 -- lihat models.py ProcessEvent.end_date
     created_by: Optional[int] = None,
     strict_date_order: bool = True,
 ) -> ProcessEvent:
@@ -182,6 +183,7 @@ def record_process_event(
         shrinkage_qty=shrinkage_qty,
         loss_qty=loss_qty,
         notes=notes,
+        end_date=end_date,
         status=EventStatus.COMPLETED,
         created_by=created_by if created_by is not None else pic_user_id,
     )

@@ -82,6 +82,7 @@ def event_to_out(session: Session, event: ProcessEvent) -> ProcessEventOut:
         shrinkage_qty=event.shrinkage_qty,
         loss_qty=event.loss_qty,
         notes=event.notes,
+        end_date=event.end_date,
         status=event.status.value,
         created_at=event.created_at,
         links=[

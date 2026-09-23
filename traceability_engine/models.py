@@ -171,6 +171,14 @@ class ProcessEvent(Base):
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[EventStatus] = mapped_column(_enum_column(EventStatus, 10), default=EventStatus.COMPLETED)
+    # Fase 48 -- kolom generik "tanggal selesai" (nullable, ALTER TABLE aman
+    # untuk DB produksi: tanpa default, tanpa rewrite baris lama). Diisi
+    # pertama kali oleh Sortation (services/sortation.py, menggantikan
+    # penyimpanan di `notes` sejak Fase 7 docstring #8); event historis yang
+    # end_date-nya sudah kadung di `notes` TIDAK dimigrasikan otomatis
+    # (keputusan user 2026-09-23) -- tetap terbaca di `notes` seperti
+    # sebelumnya, kolom ini `NULL` untuk baris-baris itu.
+    end_date: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.user_id"), nullable=True)
