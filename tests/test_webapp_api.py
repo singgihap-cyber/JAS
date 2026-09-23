@@ -72,6 +72,7 @@ def client():
             return r.json()
 
         c.login_as = _login_as
+        c.session_factory = TestingSessionLocal  # Fase 50: tes yang perlu menyiapkan data langsung
 
         bootstrap_db = TestingSessionLocal()
         try:
@@ -2384,3 +2385,55 @@ def test_api_get_single_process_event(client, supplier_id, pic_id):
     r = client.get(f"/api/process-events/{eid}")
     assert r.status_code == 200 and r.json()["event_id"] == eid and r.json()["shrinkage_qty"] == "20.000"
     assert client.get("/api/process-events/9999").status_code == 404
+
+
+# ------------------------------------------------ Fase 50
+def test_api_rebalance_shrinkage_single_and_all(client, supplier_id, pic_id, pm_id):
+    from decimal import Decimal
+    from traceability_engine.models import ProcessEvent
+    bid, eid = _api_sundried(client, supplier_id, pic_id)
+    bid2, eid2 = _api_sundried(client, supplier_id, pic_id)
+    db = client.session_factory()
+    try:  # simulasikan koreksi kuantitas era Fase 45 (susut tidak ikut)
+        db.get(ProcessEvent, eid).shrinkage_qty = Decimal("17")
+        db.get(ProcessEvent, eid2).shrinkage_qty = Decimal("25")
+        db.commit()
+    finally:
+        db.close()
+    assert len(client.get("/api/audit/event-balance").json()) == 2
+
+    client.login_as(pic_id)
+    assert client.post(f"/api/events/{eid}/rebalance-shrinkage",
+                       json={"actor_user_id": pic_id, "reason": "x"}).status_code == 403
+    client.login_as(pm_id)
+    assert client.post("/api/events/9999/rebalance-shrinkage",
+                       json={"actor_user_id": pm_id, "reason": "x"}).status_code == 404
+    ok = client.post(f"/api/events/{eid}/rebalance-shrinkage",
+                     json={"actor_user_id": pm_id, "reason": "koreksi lama"})
+    assert ok.status_code == 201, ok.text
+    c = ok.json()["correction"]
+    assert c["source"] == "REBALANCE" and c["old_shrinkage_qty"] == "17.000" and c["new_shrinkage_qty"] == "20.000"
+    again = client.post(f"/api/events/{eid}/rebalance-shrinkage",
+                        json={"actor_user_id": pm_id, "reason": "lagi"})
+    assert again.status_code == 422 and "sudah seimbang" in again.text
+    hist = client.get(f"/api/events/{eid}/history").json()
+    assert "penyeimbangan susut" in hist[-1]["detail"]
+
+    allr = client.post("/api/audit/event-balance/rebalance-all",
+                       json={"actor_user_id": pm_id, "reason": "bersih-bersih"})
+    assert allr.status_code == 201, allr.text
+    assert [r["correction"]["event_id"] for r in allr.json()] == [eid2]
+    assert client.get("/api/audit/event-balance").json() == []
+
+
+def test_api_trace_hides_void_events_by_default(client, supplier_id, pic_id, pm_id):
+    bid, eid = _api_sundried(client, supplier_id, pic_id)
+    client.login_as(pm_id)
+    r = client.post(f"/api/events/{eid}/cancel", json={"actor_user_id": pm_id, "reason": "salah input"})
+    assert r.status_code == 201, r.text
+    t = client.get(f"/api/batches/{bid}/trace").json()
+    assert t["include_void"] is False and t["void_events_excluded"] == 1
+    assert all(e["event_type"] != "SUNDRYING" for e in t["downstream_events"])
+    full = client.get(f"/api/batches/{bid}/trace", params={"include_void": "true"}).json()
+    sd = [e for e in full["downstream_events"] if e["event_type"] == "SUNDRYING"]
+    assert len(sd) == 1 and sd[0]["status"] == "VOID" and full["void_events_excluded"] == 0

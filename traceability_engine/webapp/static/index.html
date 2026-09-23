@@ -1238,10 +1238,20 @@
                     Laporan saja (tidak memblokir): event yang jumlah input ≠ output + susut + loss — biasanya akibat
                     koreksi kuantitas sebelum Fase 49. Selisih positif = ada kuantitas masuk yang tidak tercatat sebagai
                     output/susut/loss; negatif = sebaliknya.
+                    <br><b>Seimbangkan (Fase 50)</b> = susut disetel ke input − output − loss (aturan Fase 49 diterapkan
+                    surut). Stok & link tidak berubah, jadi boleh walau event sudah punya turunan. Production Manager saja,
+                    alasan wajib. Kalau yang salah justru kuantitas link, pakai Koreksi Kuantitas.
                 </div>
                 <div class="form-row">
                     <div class="form-group" style="align-self:end">
                         <button type="button" class="btn btn-secondary" id="ebRefreshBtn">🔄 Periksa Keseimbangan</button>
+                    </div>
+                    <div class="form-group" style="flex:2;min-width:220px">
+                        <label class="form-label">Alasan penyeimbangan</label>
+                        <input class="form-input" id="ebReason" placeholder="mis. koreksi kuantitas lama sebelum Fase 49">
+                    </div>
+                    <div class="form-group" style="align-self:end">
+                        <button type="button" class="btn btn-primary" id="ebRebalanceAllBtn">⚖️ Seimbangkan Semua</button>
                     </div>
                 </div>
                 <div class="table-container">

@@ -8,6 +8,21 @@ batch" -- it's already on the Batch row. This avoids ambiguity around
 self-loop events (QC/MD/Steaming/Sundrying), which repeatedly add OUTPUT
 rows for the *same* batch_id and would otherwise need special-casing to
 avoid being mistaken for new parents.
+
+Fase 50 -- event VOID (dibatalkan, Fase 44) DISARING secara default
+(`include_void=False`), backlog `[UNCONFIRMED]` sejak Fase 44 yang diputuskan
+2026-09-23 (user menyerahkan keputusan): event yang dibatalkan secara
+definisi "tidak pernah terjadi" untuk keperluan telusur, jadi:
+
+- Forward: event VOID yang mengonsumsi batch dilewati seluruhnya (tidak masuk
+  `applied_events`, batch hasilnya tidak menjadi `children`). Batch yang
+  semua konsumennya VOID otomatis kembali menjadi daun (stoknya memang sudah
+  dikembalikan oleh `cancel_event()`).
+- Backward: bila event PEMBUAT batch itu VOID, `produced_by_event` tetap diisi
+  (supaya penyebabnya terlihat) tetapi induk TIDAK ditelusuri dan node
+  ditandai `voided_origin=True` -- batch itu adalah sisa pembatalan (qty 0,
+  CONSUMED), bukan hasil nyata dari induknya.
+- `include_void=True` mengembalikan perilaku lama (untuk audit/riwayat lengkap).
 """
 from __future__ import annotations
 
@@ -17,7 +32,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..enums import EventType, LinkRole
+from ..enums import EventStatus, EventType, LinkRole
 from ..models import Batch, EventBatchLink, ProcessEvent, Supplier
 
 
@@ -26,9 +41,11 @@ class BackwardNode:
     batch: Batch
     produced_by_event: Optional[ProcessEvent]
     parents: list["BackwardNode"] = field(default_factory=list)
+    # Fase 50: event pembuat batch ini VOID dan induk sengaja tidak ditelusuri.
+    voided_origin: bool = False
 
 
-def backward_trace(session: Session, batch_id: int) -> BackwardNode:
+def backward_trace(session: Session, batch_id: int, *, include_void: bool = False) -> BackwardNode:
     """Walk from `batch_id` back to its ultimate source batch(es).
 
     A RECEIVING-created batch has no inputs (NO_INPUT_EVENT_TYPES), so
@@ -44,6 +61,9 @@ def backward_trace(session: Session, batch_id: int) -> BackwardNode:
     if batch.created_from_event_id is not None:
         event = session.get(ProcessEvent, batch.created_from_event_id)
         node.produced_by_event = event
+        if event.status == EventStatus.VOID and not include_void:
+            node.voided_origin = True
+            return node
 
         input_links = session.execute(
             select(EventBatchLink).where(
@@ -55,7 +75,7 @@ def backward_trace(session: Session, batch_id: int) -> BackwardNode:
         for link in input_links:
             if link.batch_id == batch.batch_id:
                 continue  # self-loop safety net; shouldn't occur for a creating event
-            node.parents.append(backward_trace(session, link.batch_id))
+            node.parents.append(backward_trace(session, link.batch_id, include_void=include_void))
 
     return node
 
@@ -87,7 +107,7 @@ class ForwardNode:
     children: list["ForwardNode"] = field(default_factory=list)
 
 
-def forward_trace(session: Session, batch_id: int) -> ForwardNode:
+def forward_trace(session: Session, batch_id: int, *, include_void: bool = False) -> ForwardNode:
     """Walk from `batch_id` forward through every event that consumes it or
     a descendant, until reaching SHIPPED/REJECTED terminal batches."""
     batch = session.get(Batch, batch_id)
@@ -109,6 +129,8 @@ def forward_trace(session: Session, batch_id: int) -> ForwardNode:
             continue
         seen_events.add(link.event_id)
         event = session.get(ProcessEvent, link.event_id)
+        if event.status == EventStatus.VOID and not include_void:
+            continue  # Fase 50: event dibatalkan tidak ikut ditelusuri
 
         output_links = session.execute(
             select(EventBatchLink).where(
@@ -127,7 +149,7 @@ def forward_trace(session: Session, batch_id: int) -> ForwardNode:
         else:
             node.applied_events.append(event)
             for ol in distinct_outputs:
-                node.children.append(forward_trace(session, ol.batch_id))
+                node.children.append(forward_trace(session, ol.batch_id, include_void=include_void))
 
     return node
 

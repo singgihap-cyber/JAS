@@ -463,6 +463,7 @@ def correct_event_quantity(
 
 SHRINKAGE_SOURCE_AUTO = "AUTO_QUANTITY"
 SHRINKAGE_SOURCE_TRANSFER = "TRANSFER"
+SHRINKAGE_SOURCE_REBALANCE = "REBALANCE"
 
 
 def _is_reconciled_type(event_type: EventType) -> bool:
@@ -549,6 +550,96 @@ def transfer_shrinkage_loss(
     ))
     session.flush()
     return entry
+
+
+def _link_sums(session: Session, event_id: int) -> tuple[Decimal, Decimal]:
+    s_in, s_out = ZERO, ZERO
+    for role, qty in session.execute(
+        select(EventBatchLink.role, EventBatchLink.quantity).where(EventBatchLink.event_id == event_id)
+    ).all():
+        if role == LinkRole.INPUT:
+            s_in += qty
+        else:
+            s_out += qty
+    return s_in, s_out
+
+
+@dataclass
+class RebalanceResult:
+    entry: EventShrinkageCorrection
+    warnings: list[str] = field(default_factory=list)
+
+
+def rebalance_event_shrinkage(
+    session: Session, *, event_id: int, actor_user_id: int, reason: str
+) -> RebalanceResult:
+    """Fase 50 -- seimbangkan satu event lama yang tidak seimbang (tercatat
+    di laporan audit Fase 49) dengan menyetel susut = SUM(input) -
+    SUM(output) - loss. Ini aturan Fase 49 poin 1 ("susut ikut koreksi
+    kuantitas") yang diterapkan SURUT pada event yang terlanjur dikoreksi
+    sebelum aturan itu ada. Loss tidak disentuh; stok/link tidak berubah,
+    jadi boleh walau event sudah punya turunan (sama dengan pindah
+    susut<->loss). PM saja, alasan wajib. Susut hasil negatif tidak ditolak,
+    hanya `warnings` (keputusan Fase 50, konsisten `steam_dry.py` #2)."""
+    _require_manager(session, actor_user_id, "menyeimbangkan susut event historis")
+    if not reason or not reason.strip():
+        raise InvalidEventStructureError("Alasan penyeimbangan susut wajib diisi.")
+    event = session.get(ProcessEvent, event_id)
+    if event is None:
+        raise InvalidEventStructureError(f"Event {event_id} tidak ditemukan.")
+    if event.status == EventStatus.VOID:
+        raise InvalidEventStructureError(
+            f"Event {event_id} sudah dibatalkan (VOID); susut/loss-nya tidak bisa dikoreksi."
+        )
+    if not _is_reconciled_type(event.event_type):
+        raise InvalidEventStructureError(
+            f"Event {event.event_type.value} tidak punya susut/loss (dikecualikan dari rekonsiliasi)."
+        )
+    s_in, s_out = _link_sums(session, event_id)
+    old_shrink = event.shrinkage_qty or ZERO
+    loss = event.loss_qty or ZERO
+    new_shrink = s_in - s_out - loss
+    if new_shrink == old_shrink:
+        raise InvalidEventStructureError(f"Event {event_id} sudah seimbang; tidak ada yang diubah.")
+
+    event.shrinkage_qty = new_shrink
+    entry = EventShrinkageCorrection(
+        event_id=event_id, source=SHRINKAGE_SOURCE_REBALANCE, quantity_correction_id=None,
+        old_shrinkage_qty=old_shrink, new_shrinkage_qty=new_shrink,
+        old_loss_qty=loss, new_loss_qty=loss,
+        reason=reason.strip(), actor_user_id=actor_user_id,
+    )
+    session.add(entry)
+    session.add(AuditLog(
+        entity_type="ProcessEvent", entity_id=event_id, action=AuditAction.UPDATE,
+        actor_user_id=actor_user_id,
+        before_value=f"susut {old_shrink} loss {loss}",
+        after_value=f"susut {new_shrink} loss {loss} (penyeimbangan: {reason.strip()})",
+    ))
+    session.flush()
+    warnings: list[str] = []
+    if new_shrink < ZERO:
+        warnings.append(
+            f"Susut event {event_id} menjadi negatif ({new_shrink}): output + loss melebihi input. "
+            "Periksa apakah kuantitas link yang benar-benar salah."
+        )
+    return RebalanceResult(entry=entry, warnings=warnings)
+
+
+def rebalance_all_unbalanced(
+    session: Session, *, actor_user_id: int, reason: str, batch_id: Optional[int] = None
+) -> list[RebalanceResult]:
+    """Fase 50 -- jalankan `rebalance_event_shrinkage()` untuk SETIAP event di
+    laporan audit (opsional disaring per batch). Aman dilakukan massal karena
+    tidak mengubah stok maupun link -- beda dengan pembatalan berantai yang
+    ditolak user di Fase 45."""
+    _require_manager(session, actor_user_id, "menyeimbangkan susut event historis")
+    if not reason or not reason.strip():
+        raise InvalidEventStructureError("Alasan penyeimbangan susut wajib diisi.")
+    return [
+        rebalance_event_shrinkage(session, event_id=row.event_id, actor_user_id=actor_user_id, reason=reason)
+        for row in list_unbalanced_events(session, batch_id=batch_id)
+    ]
 
 
 @dataclass
@@ -846,7 +937,10 @@ def list_event_correction_history(session: Session, *, event_id: int) -> list[Ev
         select(EventShrinkageCorrection).where(EventShrinkageCorrection.event_id == event_id)
         .order_by(EventShrinkageCorrection.correction_id)
     ).scalars():
-        how = "otomatis ikut koreksi kuantitas" if c.source == SHRINKAGE_SOURCE_AUTO else "pindah susut/loss"
+        how = {
+            SHRINKAGE_SOURCE_AUTO: "otomatis ikut koreksi kuantitas",
+            SHRINKAGE_SOURCE_REBALANCE: "penyeimbangan susut",
+        }.get(c.source, "pindah susut/loss")
         entries.append(EventHistoryEntry(
             kind="SHRINKAGE_CORRECTION", occurred_at=c.corrected_at, actor_user_id=c.actor_user_id,
             reason=c.reason,

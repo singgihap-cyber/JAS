@@ -21,7 +21,9 @@ router = APIRouter(tags=["traceability"])
 
 
 @router.get("/batches/{batch_id}/trace", response_model=ChainOfCustodyOut)
-def get_batch_trace(batch_id: int, db: Session = Depends(get_db)):
+def get_batch_trace(batch_id: int, include_void: bool = False, db: Session = Depends(get_db)):
+    """Fase 50: event VOID (dibatalkan) disaring secara default;
+    `?include_void=true` menampilkan riwayat lengkap termasuk yang dibatalkan."""
     if db.get(Batch, batch_id) is None:
         raise HTTPException(404, f"Batch {batch_id} not found")
-    return chain_of_custody_report(db, batch_id)
+    return chain_of_custody_report(db, batch_id, include_void=include_void)

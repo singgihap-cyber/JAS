@@ -442,7 +442,7 @@ class EventShrinkageCorrection(Base):
 
     correction_id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("process_events.event_id"), index=True)
-    source: Mapped[str] = mapped_column(String(20))  # AUTO_QUANTITY | TRANSFER
+    source: Mapped[str] = mapped_column(String(20))  # AUTO_QUANTITY | TRANSFER | REBALANCE (Fase 50)
     quantity_correction_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("event_quantity_corrections.correction_id"), nullable=True, index=True
     )

@@ -2256,7 +2256,9 @@ async function renderEventBalance() {
             <td>${fmtQty(r.shrinkage_qty)}</td>
             <td>${fmtQty(r.loss_qty)}</td>
             <td><span class="badge badge-warning">${Number(r.difference) > 0 ? '+' : ''}${fmtQty(r.difference)}</span></td>
-            <td>${r.has_downstream
+            <td style="white-space:nowrap">
+                <button type="button" class="btn btn-primary btn-small eb-rebalance" data-event-id="${r.event_id}">Seimbangkan</button>
+                ${r.has_downstream
                 ? `<button type="button" class="btn btn-secondary btn-small eb-chain" data-event-id="${r.event_id}">Cek Rantai Blocking</button>`
                 : `<button type="button" class="btn btn-secondary btn-small eb-qty" data-event-id="${r.event_id}">Muat ke Koreksi Kuantitas</button>`}</td>
         </tr>`).join('')
@@ -2272,6 +2274,19 @@ async function renderEventBalance() {
         document.getElementById('eqNewQuantity').focus();
         qsel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }));
+    tbody.querySelectorAll('.eb-rebalance').forEach(btn => btn.addEventListener('click', async () => {
+        const reason = ebReasonOrWarn();
+        if (!reason) return;
+        try {
+            const res = await api('POST', `/events/${btn.dataset.eventId}/rebalance-shrinkage`, {
+                actor_user_id: currentUser.user_id, reason,
+            });
+            const c = res.correction;
+            toast(`✅ Event #${c.event_id}: susut ${fmtQty(c.old_shrinkage_qty)} → ${fmtQty(c.new_shrinkage_qty)} (sekarang seimbang).`, 'success', 8000);
+            (res.warnings || []).forEach(w => toast(`⚠️ ${w}`, 'error', 10000));
+            await renderEventBalance(); await renderAuditLog();
+        } catch (err) { toastError(err, 6000); }
+    }));
     tbody.querySelectorAll('.eb-chain').forEach(btn => btn.addEventListener('click', () => {
         document.getElementById('eqChainEventId').value = btn.dataset.eventId;
         document.getElementById('eqChainBtn').click();
@@ -2279,6 +2294,26 @@ async function renderEventBalance() {
     }));
 }
 document.getElementById('ebRefreshBtn').addEventListener('click', renderEventBalance);
+
+// Fase 50: penyeimbangan susut (satu event / semua sekaligus). Aktor = user login.
+function ebReasonOrWarn() {
+    const reason = document.getElementById('ebReason').value.trim();
+    if (!reason) { toast('Isi "Alasan penyeimbangan" dulu.', 'error'); document.getElementById('ebReason').focus(); return null; }
+    if (!currentUser) { toast('Login dulu.', 'error'); return null; }
+    return reason;
+}
+document.getElementById('ebRebalanceAllBtn').addEventListener('click', async () => {
+    const reason = ebReasonOrWarn();
+    if (!reason) return;
+    try {
+        const res = await api('POST', '/audit/event-balance/rebalance-all', {
+            actor_user_id: currentUser.user_id, reason,
+        });
+        toast(res.length ? `✅ ${res.length} event diseimbangkan (susut = input − output − loss).` : 'Tidak ada event yang perlu diseimbangkan.', 'success', 8000);
+        res.flatMap(r => r.warnings || []).forEach(w => toast(`⚠️ ${w}`, 'error', 10000));
+        await renderEventBalance(); await renderAuditLog();
+    } catch (err) { toastError(err, 6000); }
+});
 
 // ─── RANTAI BLOCKING / CASCADE MANUAL BERTAHAP (Fase 45) ────────────────
 document.getElementById('eqChainBtn').addEventListener('click', async () => {
@@ -2409,6 +2444,7 @@ async function findBatch() {
                 <div style="background:var(--surface-dark);border-radius:6px;padding:10px 12px;margin-bottom:8px">
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
                         <span class="badge badge-primary">${ev.event_type}</span>
+                        ${ev.status === 'VOID' ? '<span class="badge badge-danger">VOID (dibatalkan)</span>' : ''}
                         <span style="font-size:12.5px">${ev.event_date}</span>
                         <span style="font-size:12px;color:var(--text-secondary)">PIC ${picName(ev.pic_user_id)}</span>
                     </div>
@@ -2447,7 +2483,7 @@ function traceEventRowsHtml(events) {
     return events.length ? events.map(ev => `
         <tr>
             <td>${ev.event_date}</td>
-            <td><span class="badge badge-primary">${ev.event_type}</span></td>
+            <td><span class="badge badge-primary">${ev.event_type}</span>${ev.status === 'VOID' ? ' <span class="badge badge-danger">VOID</span>' : ''}</td>
             <td>${ev.pic || '–'}</td>
             <td>${ev.total_input_quantity != null ? fmtQty(ev.total_input_quantity) : '–'}</td>
             <td>${ev.total_output_quantity != null ? fmtQty(ev.total_output_quantity) : '–'}</td>
@@ -2455,9 +2491,18 @@ function traceEventRowsHtml(events) {
         </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary)">–</td></tr>';
 }
 
+// Fase 50: event VOID disaring secara default; checkbox menampilkan semua.
+let traceIncludeVoid = false;
 async function renderChainOfCustody(batchId, traceEl) {
     try {
-        const t = await api('GET', `/batches/${batchId}/trace`);
+        const t = await api('GET', `/batches/${batchId}/trace${traceIncludeVoid ? '?include_void=true' : ''}`);
+        const voidNote = `
+            <label style="font-size:12.5px;display:flex;gap:6px;align-items:center;margin-bottom:8px">
+                <input type="checkbox" id="traceIncludeVoid" ${traceIncludeVoid ? 'checked' : ''}>
+                Tampilkan event yang dibatalkan (VOID)
+                ${!t.include_void && t.void_events_excluded ? `<span class="badge badge-gray">${t.void_events_excluded} event VOID disembunyikan</span>` : ''}
+            </label>
+            ${t.voided_origin ? '<div class="badge badge-danger" style="margin-bottom:8px">Event pembuat batch ini sudah dibatalkan (VOID) — batch ini sisa pembatalan, induknya tidak ditelusuri.</div>' : ''}`;
         const suppliersTxt = t.suppliers.length
             ? t.suppliers.map(s => `<span class="badge badge-gray">${s.supplier_code} — ${s.name}</span>`).join(' ')
             : '<span style="color:var(--text-secondary)">Tidak ada supplier di ujung backward (batch ini sendiri hasil proses, bukan langsung dari penerimaan)</span>';
@@ -2469,6 +2514,7 @@ async function renderChainOfCustody(batchId, traceEl) {
             : '<span class="badge badge-success">Tidak ada — semua ujung forward sudah SHIPPED/REJECTED</span>';
         traceEl.innerHTML = `
             <div class="form-divider">🔗 Chain of Custody (Forward + Backward)</div>
+            ${voidNote}
             <div style="font-size:13px;margin-bottom:8px"><div class="form-label">Supplier Asal (backward root)</div>${suppliersTxt}</div>
             <div style="font-size:13px;margin-bottom:8px"><div class="form-label">Pengiriman (forward leaves)</div>${shipmentsTxt}</div>
             <div style="font-size:13px;margin-bottom:12px"><div class="form-label">Batch Masih Dalam Proses (belum SHIPPED/REJECTED)</div>${incompleteTxt}</div>
@@ -2487,6 +2533,10 @@ async function renderChainOfCustody(batchId, traceEl) {
                 </table>
             </div>
         `;
+        document.getElementById('traceIncludeVoid').addEventListener('change', e => {
+            traceIncludeVoid = e.target.checked;
+            renderChainOfCustody(batchId, traceEl);
+        });
     } catch (err) {
         traceEl.innerHTML = `<p style="color:var(--danger)">Chain of custody gagal dimuat: ${err.message}</p>`;
     }

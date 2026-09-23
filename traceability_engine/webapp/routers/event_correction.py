@@ -12,7 +12,7 @@ from ...models import ProcessEvent, User
 from ...services.event_correction import (
     cancel_event, correct_event_date, correct_event_notes, correct_event_quantity, get_blocking_chain,
     list_correctable_events, list_event_correction_history, list_event_links, list_unbalanced_events,
-    shrinkage_change_for, transfer_shrinkage_loss,
+    rebalance_all_unbalanced, rebalance_event_shrinkage, shrinkage_change_for, transfer_shrinkage_loss,
 )
 from ..database import get_db
 from ..dependencies import get_current_user, require_actor_matches
@@ -20,7 +20,8 @@ from ..schemas import (
     BlockingChainOut, CorrectableEventOut, EventCancelIn, EventCancellationOut,
     EventDateCorrectionIn, EventDateCorrectionOut, EventHistoryOut, EventLinkOut,
     EventNotesCorrectionIn, EventNotesCorrectionOut, EventQuantityCorrectionIn,
-    EventQuantityCorrectionOut, ShrinkageCorrectionOut, ShrinkageTransferIn, UnbalancedEventOut,
+    EventQuantityCorrectionOut, ShrinkageCorrectionOut, ShrinkageRebalanceIn, ShrinkageRebalanceOut,
+    ShrinkageTransferIn, UnbalancedEventOut,
 )
 
 router = APIRouter(tags=["event-correction"])
@@ -170,3 +171,40 @@ def get_unbalanced_events(batch_id: Optional[int] = None, db: Session = Depends(
     """Fase 49 -- laporan event non-VOID yang SUM(input) != SUM(output) +
     susut + loss (tidak memblokir apa pun)."""
     return list_unbalanced_events(db, batch_id=batch_id)
+
+
+@router.post(
+    "/events/{event_id}/rebalance-shrinkage", response_model=ShrinkageRebalanceOut, status_code=201
+)
+def rebalance_shrinkage_endpoint(
+    event_id: int,
+    payload: ShrinkageRebalanceIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fase 50 -- seimbangkan susut satu event (susut = input - output - loss)."""
+    require_actor_matches(payload.actor_user_id, current_user)
+    if db.get(ProcessEvent, event_id) is None:
+        raise HTTPException(404, f"Event {event_id} not found")
+    res = rebalance_event_shrinkage(
+        db, event_id=event_id, actor_user_id=payload.actor_user_id, reason=payload.reason,
+    )
+    db.flush()
+    return {"correction": res.entry, "warnings": res.warnings}
+
+
+@router.post(
+    "/audit/event-balance/rebalance-all", response_model=list[ShrinkageRebalanceOut], status_code=201
+)
+def rebalance_all_endpoint(
+    payload: ShrinkageRebalanceIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fase 50 -- seimbangkan SEMUA event di laporan audit (opsional per batch)."""
+    require_actor_matches(payload.actor_user_id, current_user)
+    results = rebalance_all_unbalanced(
+        db, actor_user_id=payload.actor_user_id, reason=payload.reason, batch_id=payload.batch_id,
+    )
+    db.flush()
+    return [{"correction": r.entry, "warnings": r.warnings} for r in results]

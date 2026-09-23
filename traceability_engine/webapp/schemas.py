@@ -638,6 +638,7 @@ class TraceEventSummaryOut(BaseModel):
     event_id: int
     event_type: str
     event_date: dt.date
+    status: str = "ACTIVE"
     pic: Optional[str] = None
     notes: Optional[str] = None
     total_input_quantity: Optional[Decimal] = None
@@ -655,6 +656,10 @@ class ChainOfCustodyOut(BaseModel):
     downstream_events: list[TraceEventSummaryOut] = []
     shipments: list[TraceShipmentOut] = []
     incomplete_leaves: list[TraceBatchSummaryOut] = []
+    # Fase 50: event VOID disaring kecuali include_void=true.
+    include_void: bool = False
+    voided_origin: bool = False
+    void_events_excluded: int = 0
 
 
 # ---------------------------------------------------------------- adjustment
@@ -1057,6 +1062,18 @@ class ShrinkageCorrectionOut(BaseModel):
     corrected_at: Optional[dt.datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class ShrinkageRebalanceIn(BaseModel):
+    """Fase 50 -- susut = SUM(input) - SUM(output) - loss."""
+    actor_user_id: int  # harus PRODUCTION_MANAGER -- ditegakkan server
+    reason: str = Field(..., min_length=1)
+    batch_id: Optional[int] = None  # hanya dipakai endpoint massal
+
+
+class ShrinkageRebalanceOut(BaseModel):
+    correction: ShrinkageCorrectionOut
+    warnings: list[str] = []
 
 
 class UnbalancedEventOut(BaseModel):

@@ -88,7 +88,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..enums import BatchStatus, EventType, LinkRole
+from ..enums import BatchStatus, EventStatus, EventType, LinkRole
 from ..models import Batch, Customer, EventBatchLink, ProcessEvent, Shipment, Supplier
 from .genealogy import (
     BackwardNode,
@@ -174,13 +174,13 @@ class FullTraceResult:
     incomplete: list[Batch] = field(default_factory=list)
 
 
-def full_trace(session: Session, batch_id: int) -> FullTraceResult:
+def full_trace(session: Session, batch_id: int, *, include_void: bool = False) -> FullTraceResult:
     """Trace `batch_id` in both directions at once (`GENEALOGY.md` §7) and
     resolve both ends: `Supplier` row(s) at the backward roots,
     `Shipment` row(s) at the forward leaves, and any forward leaves that
     have not yet reached a terminal disposition."""
-    backward = backward_trace(session, batch_id)
-    forward = forward_trace(session, batch_id)
+    backward = backward_trace(session, batch_id, include_void=include_void)
+    forward = forward_trace(session, batch_id, include_void=include_void)
 
     return FullTraceResult(
         batch=backward.batch,
@@ -227,6 +227,7 @@ def _event_summary(session: Session, event: ProcessEvent) -> dict:
         "event_id": event.event_id,
         "event_type": event.event_type.value,
         "event_date": event.event_date.isoformat(),
+        "status": event.status.value,
         "pic": event.pic.name if event.pic is not None else None,
         "notes": event.notes,
         "total_input_quantity": sum(input_qty, Decimal("0")) if input_qty else None,
@@ -266,7 +267,32 @@ def _batch_summary(batch: Batch) -> dict:
     }
 
 
-def chain_of_custody_report(session: Session, batch_id: int) -> dict:
+def _count_void_events(session: Session, batch_ids: set[int]) -> int:
+    """Fase 50: jumlah event VOID yang menyentuh batch mana pun di hasil
+    telusur -- supaya laporan menyebut ada yang disaring."""
+    if not batch_ids:
+        return 0
+    ids = session.execute(
+        select(EventBatchLink.event_id)
+        .join(ProcessEvent, ProcessEvent.event_id == EventBatchLink.event_id)
+        .where(EventBatchLink.batch_id.in_(batch_ids), ProcessEvent.status == EventStatus.VOID)
+    ).scalars().all()
+    return len(set(ids))
+
+
+def _backward_batch_ids(node: BackwardNode, acc: set[int]) -> None:
+    acc.add(node.batch.batch_id)
+    for p in node.parents:
+        _backward_batch_ids(p, acc)
+
+
+def _forward_batch_ids(node: ForwardNode, acc: set[int]) -> None:
+    acc.add(node.batch.batch_id)
+    for c in node.children:
+        _forward_batch_ids(c, acc)
+
+
+def chain_of_custody_report(session: Session, batch_id: int, *, include_void: bool = False) -> dict:
     """Build the structured, end-to-end chain-of-custody report for
     `batch_id`: where the material came from, the full ordered event
     history in both directions, where it (and everything derived from it)
@@ -275,7 +301,7 @@ def chain_of_custody_report(session: Session, batch_id: int) -> dict:
     assembled from `full_trace()`'s already-resolved result, no new
     traversal.
     """
-    result = full_trace(session, batch_id)
+    result = full_trace(session, batch_id, include_void=include_void)
 
     upstream_events = []
     _collect_backward_events(result.backward, upstream_events)
@@ -285,6 +311,10 @@ def chain_of_custody_report(session: Session, batch_id: int) -> dict:
     _collect_forward_events(result.forward, downstream_events)
     downstream_events = _dedupe_sorted_events(downstream_events)
 
+    batch_ids: set[int] = set()
+    _backward_batch_ids(result.backward, batch_ids)
+    _forward_batch_ids(result.forward, batch_ids)
+
     return {
         "batch": _batch_summary(result.batch),
         "suppliers": [_supplier_summary(s) for s in result.suppliers],
@@ -292,4 +322,8 @@ def chain_of_custody_report(session: Session, batch_id: int) -> dict:
         "downstream_events": [_event_summary(session, e) for e in downstream_events],
         "shipments": [_shipment_summary(session, s) for s in result.shipments],
         "incomplete_leaves": [_batch_summary(b) for b in result.incomplete],
+        # Fase 50: event VOID disaring kecuali include_void=True.
+        "include_void": include_void,
+        "voided_origin": result.backward.voided_origin,
+        "void_events_excluded": 0 if include_void else _count_void_events(session, batch_ids),
     }
