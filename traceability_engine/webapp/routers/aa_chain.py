@@ -8,13 +8,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ...models import Batch
+from ...models import Batch, User
 from ...services.aa_chain import audit_aa_chain
 from ...services.aa_review import correct_batch_number, list_number_history, review_aa_finding
 from ...services.jenis_correction import (
     correct_batch_jenis, list_jenis_corrections, plan_jenis_correction,
 )
 from ..database import get_db
+from ..dependencies import get_current_user, require_actor_matches
 from ..schemas import (
     AaChangeFindingOut, AaFindingReviewIn, AaFindingReviewOut,
     BatchNumberCorrectionIn, BatchNumberCorrectionOut, JenisCorrectionIn, JenisCorrectionOut,
@@ -42,8 +43,13 @@ def get_aa_chain_audit(
 
 
 @router.post("/audit/aa-chain/review", response_model=AaFindingReviewOut, status_code=201)
-def review_aa_chain_finding(payload: AaFindingReviewIn, db: Session = Depends(get_db)):
+def review_aa_chain_finding(
+    payload: AaFindingReviewIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Fase 42: tandai temuan DITINJAU / DIABAIKAN (Production Manager saja, catatan wajib)."""
+    require_actor_matches(payload.actor_user_id, current_user)
     rv = review_aa_finding(
         db, event_id=payload.event_id, source_batch_id=payload.source_batch_id,
         result_batch_id=payload.result_batch_id, status=payload.status,
@@ -53,8 +59,14 @@ def review_aa_chain_finding(payload: AaFindingReviewIn, db: Session = Depends(ge
 
 
 @router.post("/batches/{batch_id}/correct-number", response_model=BatchNumberCorrectionOut, status_code=201)
-def correct_number(batch_id: int, payload: BatchNumberCorrectionIn, db: Session = Depends(get_db)):
+def correct_number(
+    batch_id: int,
+    payload: BatchNumberCorrectionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Fase 42: ganti nomor batch (Production Manager saja, alasan wajib, jejak lengkap)."""
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(Batch, batch_id) is None:
         raise HTTPException(404, f"Batch {batch_id} not found")
     entry = correct_batch_number(
@@ -90,7 +102,13 @@ def preview_jenis_correction(batch_id: int, new_jenis_code: str, db: Session = D
 
 
 @router.post("/batches/{batch_id}/correct-jenis", response_model=JenisCorrectionOut, status_code=201)
-def correct_jenis_endpoint(batch_id: int, payload: JenisCorrectionIn, db: Session = Depends(get_db)):
+def correct_jenis_endpoint(
+    batch_id: int,
+    payload: JenisCorrectionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(Batch, batch_id) is None:
         raise HTTPException(404, f"Batch {batch_id} not found")
     entry, plan = correct_batch_jenis(

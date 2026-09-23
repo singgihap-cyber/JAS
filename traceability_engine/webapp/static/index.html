@@ -7,6 +7,44 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<!-- Fase 47: gerbang login. Ditampilkan di atas seluruh app (position:fixed
+     lewat style.css baru) sampai GET /auth/me berhasil; disembunyikan
+     setelah login sukses. Lihat app.js showLoginOverlay()/hideLoginOverlay(). -->
+<div id="loginOverlay" class="login-overlay" style="display:none">
+    <form id="loginForm" class="login-box">
+        <div class="logo" style="margin-bottom:16px">🌾 JAS Traceability</div>
+        <div class="form-group">
+            <label class="form-label">Username</label>
+            <input class="form-input" id="loginUsername" required autocomplete="username">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input class="form-input" id="loginPassword" type="password" required autocomplete="current-password">
+        </div>
+        <div id="loginError" class="form-hint" style="color:var(--danger);display:none"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Masuk</button>
+    </form>
+</div>
+
+<!-- Fase 47: paksa ganti password saat must_change_password=true (login pertama
+     setelah PM membuatkan akun). -->
+<div id="changePasswordOverlay" class="login-overlay" style="display:none">
+    <form id="changePasswordForm" class="login-box">
+        <div class="logo" style="margin-bottom:16px">🔑 Ganti Password</div>
+        <div class="form-hint" style="margin-bottom:12px">Ini login pertama Anda — silakan ganti password sebelum lanjut.</div>
+        <div class="form-group">
+            <label class="form-label">Password saat ini</label>
+            <input class="form-input" id="cpOld" type="password" required autocomplete="current-password">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Password baru (min. 6 karakter)</label>
+            <input class="form-input" id="cpNew" type="password" required minlength="6" autocomplete="new-password">
+        </div>
+        <div id="cpError" class="form-hint" style="color:var(--danger);display:none"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Ganti Password</button>
+    </form>
+</div>
+
 <div class="sidebar">
     <div class="logo">🌾 JAS Traceability<small>Fase 15 — slice 5</small></div>
     <div class="nav">
@@ -28,7 +66,11 @@
 <div class="main">
     <div class="header">
         <h1 id="pageTitle">Dashboard</h1>
-        <div class="api-status err" id="apiStatus">Menghubungkan...</div>
+        <div style="display:flex;align-items:center;gap:12px">
+            <span id="currentUserBadge" class="badge badge-primary" style="display:none"></span>
+            <button type="button" id="logoutBtn" class="btn btn-secondary btn-small" style="display:none">Keluar</button>
+            <div class="api-status err" id="apiStatus">Menghubungkan...</div>
+        </div>
     </div>
     <div class="content">
 
@@ -1401,9 +1443,13 @@
                 </form>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>Nama</th><th>Role</th></tr></thead>
+                        <thead><tr><th>Nama</th><th>Role</th><th>Login</th></tr></thead>
                         <tbody id="usersTable"></tbody>
                     </table>
+                </div>
+                <div class="form-hint" style="margin-top:8px">
+                    Fase 47: hanya Production Manager yang bisa membuat/mengganti login user (server menolak 403 selain itu).
+                    Beri tahu username &amp; password awal ke pemiliknya secara langsung (lisan/WA) -- sistem tidak mengirimkannya.
                 </div>
             </div>
         </div>

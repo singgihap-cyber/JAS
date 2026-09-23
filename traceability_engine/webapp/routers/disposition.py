@@ -8,9 +8,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ...models import Batch
+from ...models import Batch, User
 from ...services.disposition import audit_disposition, return_to_supplier
 from ..database import get_db
+from ..dependencies import get_current_user, require_actor_matches
 from ..schemas import DispositionRowOut, ProcessEventOut, SupplierReturnCreate
 from ..serializers import event_to_out
 
@@ -18,7 +19,13 @@ router = APIRouter(tags=["disposition"])
 
 
 @router.post("/batches/{batch_id}/return-to-supplier", response_model=ProcessEventOut, status_code=201)
-def create_supplier_return(batch_id: int, payload: SupplierReturnCreate, db: Session = Depends(get_db)):
+def create_supplier_return(
+    batch_id: int,
+    payload: SupplierReturnCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(Batch, batch_id) is None:
         raise HTTPException(404, f"Batch {batch_id} not found")
     event = return_to_supplier(

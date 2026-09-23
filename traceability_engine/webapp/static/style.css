@@ -123,3 +123,16 @@ td { padding: 8px 10px; border-top: 1px solid var(--border); font-size: 12.5px; 
     .nav { flex-direction: row; }
     .form-row, .form-row-3 { grid-template-columns: 1fr; }
 }
+
+/* ─── Fase 47: login overlay ────────────────────────────────────────────── */
+.login-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+}
+.login-box {
+    width: 320px; padding: 32px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+}
+.login-box .form-group { margin-bottom: 14px; }

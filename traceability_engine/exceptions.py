@@ -72,3 +72,25 @@ class BulkReturnConfirmError(TraceabilityError):
             f"Konfirmasi massal dibatalkan seluruhnya: {len(failures)} retur bermasalah, "
             "tidak ada yang tersimpan. " + "; ".join(f"#{f['event_id']}: {f['reason']}" for f in failures)
         )
+
+
+class NotLoggedInError(TraceabilityError):
+    """Fase 47 -- tidak ada sesi login yang valid (cookie `session_token`
+    tidak ada / kedaluwarsa / dicabut). Hampir semua endpoint API mensyaratkan
+    ini (dipasang sebagai dependency global per-router di `main.py`),
+    kecuali `POST /auth/login`."""
+
+
+class InvalidCredentialsError(TraceabilityError):
+    """Fase 47 -- username tidak terdaftar atau password salah saat
+    `POST /auth/login`. Pesan generik (tidak membedakan keduanya) supaya
+    tidak membocorkan username mana yang terdaftar."""
+
+
+class ActorMismatchError(TraceabilityError):
+    """Fase 47 -- `actor_user_id` yang dikirim di body request tidak sama
+    dengan user yang sedang login (session cookie). Menutup celah
+    penyamaran: sebelum Fase 47, `actor_user_id` dipercaya begitu saja dari
+    dropdown UI (Fase 26/34/40/41/42/44/45), sehingga siapa pun bisa
+    mengklaim jadi Production Manager tanpa dicek betul-betul siapa yang
+    login."""

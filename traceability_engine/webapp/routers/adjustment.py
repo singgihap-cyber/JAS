@@ -31,9 +31,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...models import AuditLog, Batch
+from ...models import AuditLog, Batch, User
 from ...services.adjustment import mark_batch_rejected, mark_batch_superseded, record_adjustment
 from ..database import get_db
+from ..dependencies import get_current_user, require_actor_matches
 from ..schemas import AdjustmentCreate, AuditLogOut, BatchOut, ProcessEventOut, RejectCreate, SupersedeCreate
 from ..serializers import audit_log_to_out, batch_to_out, event_to_out
 
@@ -41,7 +42,12 @@ router = APIRouter(tags=["adjustment"])
 
 
 @router.post("/adjustment", response_model=ProcessEventOut, status_code=201)
-def create_adjustment(payload: AdjustmentCreate, db: Session = Depends(get_db)):
+def create_adjustment(
+    payload: AdjustmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_actor_matches(payload.actor_user_id, current_user)
     event = record_adjustment(
         db,
         batch_id=payload.batch_id,
@@ -56,11 +62,17 @@ def create_adjustment(payload: AdjustmentCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/batches/{batch_id}/reject", response_model=BatchOut)
-def reject_batch(batch_id: int, payload: RejectCreate, db: Session = Depends(get_db)):
+def reject_batch(
+    batch_id: int,
+    payload: RejectCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     # batch_id comes from the URL path (a resource reference), not a
     # body-validated field -- same fetch-by-id = 404 pattern as the Fase 15
     # slice 4 GET-by-id endpoints ("Keputusan Fase 15 (slice 4)" #5), rather
     # than letting InvalidEventStructureError fall through to a generic 422.
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(Batch, batch_id) is None:
         raise HTTPException(404, f"Batch {batch_id} not found")
     batch = mark_batch_rejected(
@@ -71,7 +83,13 @@ def reject_batch(batch_id: int, payload: RejectCreate, db: Session = Depends(get
 
 
 @router.post("/batches/{batch_id}/supersede", response_model=BatchOut)
-def supersede_batch(batch_id: int, payload: SupersedeCreate, db: Session = Depends(get_db)):
+def supersede_batch(
+    batch_id: int,
+    payload: SupersedeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(Batch, batch_id) is None:
         raise HTTPException(404, f"Batch {batch_id} not found")
     batch = mark_batch_superseded(

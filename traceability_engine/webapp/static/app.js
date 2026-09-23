@@ -65,6 +65,116 @@ let users = [];
 let batches = [];
 let customers = [];
 let customerAliases = []; // Fase 21 lanjutan -- flat list from GET /customer-aliases, {alias_id, customer_id, alias}
+let currentUser = null; // Fase 47 -- {user_id, name, role, must_change_password}, diisi oleh checkAuth()
+
+// ─── Fase 47: login gate ────────────────────────────────────────────────
+// Selain daftar id di sini, `renderPicSelects()` (di bawah) mengunci 14
+// dropdown "aktor" yang menegakkan role Production Manager di server
+// (Fase 26/34/40/41/42/44/45/46) ke identitas sesi yang sedang login --
+// tidak lagi bisa dipilih bebas dari dropdown, supaya cocok dengan
+// pengecekan `require_actor_matches` di server.
+const ACTOR_LOCKED_SELECT_IDS = [
+    'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic',
+    'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic', 'eqPic', 'enPic', 'jcPic',
+];
+
+function applyCurrentUserToActorFields() {
+    if (!currentUser) return;
+    const label = `${currentUser.name} (${currentUser.role})`;
+    ACTOR_LOCKED_SELECT_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerHTML = `<option value="${currentUser.user_id}" selected>${label} — Anda</option>`;
+        el.disabled = true;
+    });
+    const badge = document.getElementById('currentUserBadge');
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (badge) { badge.textContent = `👤 ${currentUser.name} (${currentUser.role})`; badge.style.display = ''; }
+    if (logoutBtn) logoutBtn.style.display = '';
+}
+
+function showLoginOverlay(message) {
+    document.getElementById('loginOverlay').style.display = 'flex';
+    document.getElementById('changePasswordOverlay').style.display = 'none';
+    const errEl = document.getElementById('loginError');
+    if (message) { errEl.textContent = message; errEl.style.display = ''; }
+    else { errEl.style.display = 'none'; }
+}
+
+function hideLoginOverlay() {
+    document.getElementById('loginOverlay').style.display = 'none';
+}
+
+function showChangePasswordOverlay() {
+    document.getElementById('changePasswordOverlay').style.display = 'flex';
+}
+
+function hideChangePasswordOverlay() {
+    document.getElementById('changePasswordOverlay').style.display = 'none';
+}
+
+// Mengembalikan true kalau sudah login (dan, bila perlu, sudah lewat paksa
+// ganti password) -- boot() menunggu ini sebelum memuat data apa pun,
+// supaya tidak ada request lain yang keburu jalan lalu gagal 401.
+async function checkAuth() {
+    try {
+        currentUser = await api('GET', '/auth/me');
+    } catch (err) {
+        showLoginOverlay();
+        return false;
+    }
+    if (currentUser.must_change_password) {
+        showChangePasswordOverlay();
+        return false;
+    }
+    hideLoginOverlay();
+    applyCurrentUserToActorFields();
+    return true;
+}
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    try {
+        currentUser = await api('POST', '/auth/login', { username, password });
+        document.getElementById('loginForm').reset();
+        if (currentUser.must_change_password) {
+            hideLoginOverlay();
+            showChangePasswordOverlay();
+        } else {
+            hideLoginOverlay();
+            applyCurrentUserToActorFields();
+            await boot();
+        }
+    } catch (err) {
+        showLoginOverlay(err.message || 'Username atau password salah.');
+    }
+});
+
+document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const old_password = document.getElementById('cpOld').value;
+    const new_password = document.getElementById('cpNew').value;
+    const errEl = document.getElementById('cpError');
+    try {
+        await api('POST', '/auth/change-password', { old_password, new_password });
+        document.getElementById('changePasswordForm').reset();
+        errEl.style.display = 'none';
+        hideChangePasswordOverlay();
+        currentUser.must_change_password = false;
+        applyCurrentUserToActorFields();
+        await boot();
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = '';
+    }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+    try { await api('POST', '/auth/logout'); } catch (err) { /* tetap lanjut ke layar login */ }
+    location.reload();
+});
 
 // ─── NAVIGATION ─────────────────────────────────────────────────────────
 const PAGE_TITLES = {
@@ -116,8 +226,12 @@ function renderSupplierSelect() {
 function renderPicSelects() {
     const opts = '<option value="">Pilih PIC...</option>' +
         users.map(u => `<option value="${u.user_id}">${u.name} (${u.role})</option>`).join('');
-    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic', 'ajPic', 'rjPic', 'ssPic', 'rtPic', 'srcPic', 'srcCancelPic', 'srBulkPic', 'aaReviewPic', 'bncPic', 'ecDatePic', 'ecCancelPic', 'eqPic', 'enPic', 'jcPic']
+    // Fase 47: 14 dropdown "aktor" PM-gated dikunci ke user yang login
+    // (ACTOR_LOCKED_SELECT_IDS / applyCurrentUserToActorFields di atas) --
+    // TIDAK diisi di sini supaya tidak menimpa kuncian itu.
+    ['rPic', 'pPic', 'mPic', 'vPic', 'pkPic', 'dPic', 'sdPic']
         .forEach(id => { document.getElementById(id).innerHTML = opts; });
+    applyCurrentUserToActorFields();
 }
 
 function renderCustomerSelects() {
@@ -253,9 +367,38 @@ function renderSuppliersTable() {
 
 function renderUsersTable() {
     document.getElementById('usersTable').innerHTML = users.length ? users.map(u => `
-        <tr><td><strong>${u.name}</strong></td><td><span class="badge badge-primary">${u.role}</span></td></tr>
-    `).join('') : '<tr><td colspan="2" style="text-align:center;color:var(--text-secondary)">Belum ada user</td></tr>';
+        <tr>
+            <td><strong>${u.name}</strong></td>
+            <td><span class="badge badge-primary">${u.role}</span></td>
+            <td>
+                <div style="display:flex;gap:4px;align-items:center">
+                    <input class="form-input" style="padding:4px 8px;font-size:12px;width:110px" placeholder="username" data-cred-username="${u.user_id}">
+                    <input class="form-input" style="padding:4px 8px;font-size:12px;width:110px" type="password" placeholder="password (min 6)" data-cred-password="${u.user_id}">
+                    <button type="button" class="btn btn-secondary btn-small" data-cred-save="${u.user_id}">Set Login</button>
+                </div>
+            </td>
+        </tr>
+    `).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--text-secondary)">Belum ada user</td></tr>';
 }
+
+// Fase 47: buat/reset login user (Production Manager saja -- server 403 selain itu)
+document.getElementById('usersTable').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-cred-save]');
+    if (!btn) return;
+    const userId = btn.dataset.credSave;
+    const username = document.querySelector(`[data-cred-username="${userId}"]`).value.trim();
+    const password = document.querySelector(`[data-cred-password="${userId}"]`).value;
+    if (!username || password.length < 6) {
+        toast('Isi username dan password (minimal 6 karakter) dulu.', 'error');
+        return;
+    }
+    try {
+        await api('POST', `/auth/users/${userId}/credentials`, { username, password });
+        toast('✅ Login user disimpan. Beri tahu username & password ini ke pemiliknya secara langsung.', 'success', 6000);
+        document.querySelector(`[data-cred-username="${userId}"]`).value = '';
+        document.querySelector(`[data-cred-password="${userId}"]`).value = '';
+    } catch (err) { toastError(err); }
+});
 
 document.getElementById('supplierForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -2346,6 +2489,7 @@ async function refreshBatches() {
 // ─── BOOT ───────────────────────────────────────────────────────────────
 async function boot() {
     const statusEl = document.getElementById('apiStatus');
+    if (!(await checkAuth())) return;  // Fase 47: berhenti di layar login/ganti-password
     try {
         renderStageSelect();
         initMixSources();

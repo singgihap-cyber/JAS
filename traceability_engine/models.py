@@ -451,3 +451,46 @@ class JenisCorrection(Base):
     reason: Mapped[str] = mapped_column(Text)
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
     corrected_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class UserCredential(Base):
+    """Fase 47 -- login untuk SATU `User` yang sudah ada (dibuat lewat
+    `POST /users` di master_data.py sejak Fase 3, tidak berubah). Tabel baru
+    terpisah dari `users` (bukan ALTER) supaya `create_all` cukup untuk DB
+    produksi, pola sama dengan setiap tabel baru sejak Fase 38. `username`
+    unik lintas seluruh sistem (bukan `User.name`, yang tidak dijamin unik).
+    Password di-hash PBKDF2-HMAC-SHA256 (stdlib `hashlib`, tanpa dependency
+    baru) dengan salt acak per user -- lihat `services/auth.py`.
+    `must_change_password` default True: dipaksa ganti password pada login
+    pertama setelah Production Manager membuatkan akun (keputusan user
+    2026-09-23: PM buat user manual lewat halaman admin)."""
+
+    __tablename__ = "user_credentials"
+
+    credential_id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    password_salt: Mapped[str] = mapped_column(String(64))
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class UserSession(Base):
+    """Fase 47 -- sesi login aktif (cookie `session_token`, HttpOnly).
+    `expires_at` tetap (tidak sliding/diperpanjang otomatis saat dipakai --
+    [UNCONFIRMED] durasi default 8 jam, bisa diubah bila user memintanya).
+    Logout / kedaluwarsa ditandai lewat `revoked_at` (baris tidak dihapus --
+    jejak login tetap ada untuk audit, pola sama dengan tabel riwayat
+    lain sejak Fase 40)."""
+
+    __tablename__ = "user_sessions"
+
+    session_token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"), index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    revoked_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)

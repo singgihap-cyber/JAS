@@ -8,12 +8,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ...models import ProcessEvent
+from ...models import ProcessEvent, User
 from ...services.event_correction import (
     cancel_event, correct_event_date, correct_event_notes, correct_event_quantity, get_blocking_chain,
     list_correctable_events, list_event_correction_history, list_event_links,
 )
 from ..database import get_db
+from ..dependencies import get_current_user, require_actor_matches
 from ..schemas import (
     BlockingChainOut, CorrectableEventOut, EventCancelIn, EventCancellationOut,
     EventDateCorrectionIn, EventDateCorrectionOut, EventHistoryOut, EventLinkOut,
@@ -32,7 +33,13 @@ def get_correctable_events(batch_id: Optional[int] = None, db: Session = Depends
 
 
 @router.post("/events/{event_id}/correct-date", response_model=EventDateCorrectionOut, status_code=201)
-def correct_event_date_endpoint(event_id: int, payload: EventDateCorrectionIn, db: Session = Depends(get_db)):
+def correct_event_date_endpoint(
+    event_id: int,
+    payload: EventDateCorrectionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     entry = correct_event_date(
@@ -44,7 +51,13 @@ def correct_event_date_endpoint(event_id: int, payload: EventDateCorrectionIn, d
 
 
 @router.post("/events/{event_id}/cancel", response_model=EventCancellationOut, status_code=201)
-def cancel_event_endpoint(event_id: int, payload: EventCancelIn, db: Session = Depends(get_db)):
+def cancel_event_endpoint(
+    event_id: int,
+    payload: EventCancelIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     entry = cancel_event(
@@ -74,8 +87,12 @@ def get_event_links(event_id: int, db: Session = Depends(get_db)):
     "/events/{event_id}/correct-quantity", response_model=EventQuantityCorrectionOut, status_code=201
 )
 def correct_event_quantity_endpoint(
-    event_id: int, payload: EventQuantityCorrectionIn, db: Session = Depends(get_db)
+    event_id: int,
+    payload: EventQuantityCorrectionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     entry = correct_event_quantity(
@@ -97,8 +114,14 @@ def get_event_blocking_chain(event_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/events/{event_id}/correct-notes", response_model=EventNotesCorrectionOut, status_code=201)
-def correct_event_notes_endpoint(event_id: int, payload: EventNotesCorrectionIn, db: Session = Depends(get_db)):
+def correct_event_notes_endpoint(
+    event_id: int,
+    payload: EventNotesCorrectionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Fase 46 -- timpa catatan event historis (PM, alasan wajib, tanpa turunan)."""
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     entry = correct_event_notes(

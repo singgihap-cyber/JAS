@@ -1093,3 +1093,27 @@ class JenisCorrectionOut(BaseModel):
     plan: Optional[JenisCorrectionPlanOut] = None
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------- auth (Fase 47)
+class LoginIn(BaseModel):
+    username: str = Field(..., max_length=100)
+    password: str = Field(..., max_length=200)
+
+
+class MeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    user_id: int
+    name: str
+    role: str
+    must_change_password: bool = False
+
+
+class SetCredentialsIn(BaseModel):
+    username: str = Field(..., max_length=100)
+    password: str = Field(..., min_length=6, max_length=200)
+
+
+class ChangePasswordIn(BaseModel):
+    old_password: str = Field(..., max_length=200)
+    new_password: str = Field(..., min_length=6, max_length=200)

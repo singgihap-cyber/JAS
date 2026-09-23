@@ -21,7 +21,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from traceability_engine.models import Base
+from traceability_engine.enums import UserRole
+from traceability_engine.models import Base, User
+from traceability_engine.services import auth as auth_service
 from traceability_engine.webapp.database import get_db
 from traceability_engine.webapp.main import app
 
@@ -47,6 +49,40 @@ def client():
 
     app.dependency_overrides[get_db] = _override_get_db
     with TestClient(app) as c:
+        # Fase 47: login sekarang wajib untuk (hampir) semua endpoint --
+        # lihat webapp/main.py `_login_required` di include_router. Setiap
+        # test lama di file ini tetap jalan tanpa diubah lewat bootstrap
+        # login sebagai Production Manager di bawah; test yang secara
+        # eksplisit menguji IDENTITAS/ROLE aktor (siapa yang boleh
+        # melakukan apa) memanggil `client.login_as(user_id)` sendiri untuk
+        # berpindah sesi sebelum request yang relevan.
+        def _login_as(user_id: int, username: str | None = None, password: str = "Passw0rd!1") -> dict:
+            username = username or f"user{user_id}"
+            db = TestingSessionLocal()
+            try:
+                auth_service.set_credentials(
+                    db, user_id=user_id, username=username, password=password,
+                    must_change_password=False,
+                )
+                db.commit()
+            finally:
+                db.close()
+            r = c.post("/api/auth/login", json={"username": username, "password": password})
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        c.login_as = _login_as
+
+        bootstrap_db = TestingSessionLocal()
+        try:
+            bootstrap_user = User(name="_bootstrap", role=UserRole.PRODUCTION_MANAGER)
+            bootstrap_db.add(bootstrap_user)
+            bootstrap_db.commit()
+            bootstrap_id = bootstrap_user.user_id
+        finally:
+            bootstrap_db.close()
+        _login_as(bootstrap_id, username="_bootstrap", password="Bootstrap#1")
+
         yield c
     app.dependency_overrides.clear()
 
@@ -1319,6 +1355,7 @@ def test_non_production_manager_adjustment_is_403_over_http(client, supplier_id,
         },
     )
     batch_id = r.json()["batch"]["batch_id"]
+    client.login_as(pic_id)
     r = client.post(
         "/api/adjustment",
         json={
@@ -1347,6 +1384,7 @@ def test_production_manager_adjustment_updates_batch_and_writes_audit_log(
     )
     batch_id = r.json()["batch"]["batch_id"]
 
+    client.login_as(pm_id)
     r = client.post(
         "/api/adjustment",
         json={
@@ -1379,6 +1417,7 @@ def test_adjustment_without_reason_is_422_over_http(client, supplier_id, pic_id,
         },
     )
     batch_id = r.json()["batch"]["batch_id"]
+    client.login_as(pm_id)
     r = client.post(
         "/api/adjustment",
         json={
@@ -1405,6 +1444,7 @@ def test_reject_batch_over_http_updates_status_and_audit_log(client, supplier_id
     )
     batch_id = r.json()["batch"]["batch_id"]
 
+    client.login_as(pic_id)
     r = client.post(f"/api/batches/{batch_id}/reject", json={"actor_user_id": pic_id, "reason": "AW terlalu tinggi"})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "REJECTED"
@@ -1426,6 +1466,7 @@ def test_supersede_batch_over_http_updates_status(client, supplier_id, pic_id):
     )
     batch_id = r.json()["batch"]["batch_id"]
 
+    client.login_as(pic_id)
     r = client.post(
         f"/api/batches/{batch_id}/supersede", json={"actor_user_id": pic_id, "reason": "Downgrade via Sortasi"}
     )
@@ -1434,6 +1475,7 @@ def test_supersede_batch_over_http_updates_status(client, supplier_id, pic_id):
 
 
 def test_reject_and_supersede_404_for_unknown_batch(client, pic_id):
+    client.login_as(pic_id)
     r1 = client.post("/api/batches/99999/reject", json={"actor_user_id": pic_id, "reason": "x"})
     r2 = client.post("/api/batches/99999/supersede", json={"actor_user_id": pic_id, "reason": "x"})
     assert r1.status_code == 404
@@ -1741,13 +1783,16 @@ def test_supplier_return_and_disposition_audit_endpoints(client, supplier_id, pi
     body = {"event_date": "2026-06-20", "reason": "Ditolak MD1", "actor_user_id": pm_id}
     assert client.get("/api/audit/disposition").json() == []
     # Belum REJECTED -> 422
+    client.login_as(pm_id)
     assert client.post(f"/api/batches/{b}/return-to-supplier", json=body).status_code == 422
+    client.login_as(pic_id)
     assert client.post(f"/api/batches/{b}/reject", json={"actor_user_id": pic_id, "reason": "logam"}).status_code == 200
     rows = client.get("/api/audit/disposition").json()
     assert len(rows) == 1 and rows[0]["disposition"] == "PENDING_RETURN" and rows[0]["supplier_name"] == "WARDOYO"
-    # STAFF -> 403
+    # STAFF -> 403 (masih login sebagai pic_id di atas)
     denied = client.post(f"/api/batches/{b}/return-to-supplier", json={**body, "actor_user_id": pic_id})
     assert denied.status_code == 403 and denied.json()["error"] == "unauthorized_disposition"
+    client.login_as(pm_id)
     assert client.post("/api/batches/999/return-to-supplier", json=body).status_code == 404
     ok = client.post(f"/api/batches/{b}/return-to-supplier", json={**body, "quantity": "4.000"})
     assert ok.status_code == 201 and ok.json()["event_type"] == "SUPPLIER_RETURN"
@@ -1949,6 +1994,7 @@ def test_api_supplier_return_flow(client, supplier_id, pic_id):
     [row] = client.get("/api/supplier-returns").json()
     assert row["status"] == "DIKIRIM" and row["quantity"] == "3.000" and row["supplier_name"] == "WARDOYO"
     eid = row["event_id"]
+    client.login_as(pic_id)
     assert client.post("/api/supplier-returns/9999/confirm-received",
                        json={"received_date": "2026-09-20", "actor_user_id": pic_id}).status_code == 404
     bad = client.post(f"/api/supplier-returns/{eid}/confirm-received",
@@ -1987,6 +2033,7 @@ def test_api_supplier_return_reminders(client, supplier_id, pic_id):
     assert rem["total_quantity"] == "3.000" and "belum dikonfirmasi" in rem["message"]
     assert len(client.get("/api/supplier-returns?overdue=true").json()) == 1
     eid = rem["items"][0]["event_id"]
+    client.login_as(pic_id)
     assert client.post(f"/api/supplier-returns/{eid}/confirm-received", json={
         "received_date": "2026-01-08", "actor_user_id": pic_id}).status_code == 201
     rem = client.get("/api/supplier-returns/reminders").json()
@@ -2005,11 +2052,14 @@ def test_api_role_cancel_and_history(client, supplier_id, pic_id):
     outsider = client.post("/api/users", json={"name": "Orang Lain", "role": "STAFF"}).json()["user_id"]
     pm = client.post("/api/users", json={"name": "Robiah", "role": "PRODUCTION_MANAGER"}).json()["user_id"]
     body = {"received_date": "2026-09-20", "actor_user_id": outsider}
+    client.login_as(outsider)
     assert client.post(f"/api/supplier-returns/{eid}/confirm-received", json=body).status_code == 403
+    client.login_as(pic_id)
     assert client.post(f"/api/supplier-returns/{eid}/confirm-received",
                        json={**body, "actor_user_id": pic_id}).status_code == 201
     assert client.post(f"/api/supplier-returns/{eid}/cancel-confirmation",
                        json={"actor_user_id": pic_id, "reason": "salah"}).status_code == 403
+    client.login_as(pm)
     assert client.post(f"/api/supplier-returns/{eid}/cancel-confirmation",
                        json={"actor_user_id": pm, "reason": ""}).status_code == 422
     assert client.post("/api/supplier-returns/9999/cancel-confirmation",
@@ -2032,7 +2082,9 @@ def test_api_bulk_confirm_supplier_returns(client, supplier_id, pic_id):
     pm = client.post("/api/users", json={"name": "Robiah", "role": "PRODUCTION_MANAGER"}).json()["user_id"]
     url = "/api/supplier-returns/bulk-confirm-received"
     body = {"event_ids": ids, "received_date": "2026-09-20", "actor_user_id": pm}
+    client.login_as(pic_id)
     assert client.post(url, json={**body, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm)
     bad = client.post(url, json={**body, "event_ids": ids + [9999]})
     assert bad.status_code == 422 and bad.json()["error"] == "bulk_return_confirm_error"
     assert [f["event_id"] for f in bad.json()["failures"]] == [9999]
@@ -2060,7 +2112,9 @@ def test_api_aa_review_and_batch_number_correction(client, supplier_id, pic_id, 
     key = {"event_id": f["event_id"], "source_batch_id": f["source_batch_id"],
            "result_batch_id": f["result_batch_id"], "status": "DITINJAU", "note": "Wajar"}
 
+    client.login_as(pic_id)
     assert client.post("/api/audit/aa-chain/review", json={**key, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm_id)
     ok = client.post("/api/audit/aa-chain/review", json={**key, "actor_user_id": pm_id})
     assert ok.status_code == 201 and ok.json()["status"] == "DITINJAU"
     assert client.get("/api/audit/aa-chain", params={"review_status": "BARU"}).json() == []
@@ -2068,7 +2122,9 @@ def test_api_aa_review_and_batch_number_correction(client, supplier_id, pic_id, 
 
     rid = f["result_batch_id"]
     body = {"new_batch_number": "0202024-260918-00", "reason": "Salah AA"}
+    client.login_as(pic_id)
     assert client.post(f"/api/batches/{rid}/correct-number", json={**body, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm_id)
     assert client.post("/api/batches/9999/correct-number", json={**body, "actor_user_id": pm_id}).status_code == 404
     bad = client.post(f"/api/batches/{rid}/correct-number",
                       json={**body, "new_batch_number": "ngawur", "actor_user_id": pm_id})
@@ -2096,7 +2152,9 @@ def test_api_correct_event_date(client, supplier_id, pic_id, pm_id):
     eid = qc.json()["event_id"]
 
     body = {"new_event_date": "2026-09-12", "reason": "Salah ketik tanggal"}
+    client.login_as(pic_id)
     assert client.post(f"/api/events/{eid}/correct-date", json={**body, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm_id)
     assert client.post("/api/events/9999/correct-date", json={**body, "actor_user_id": pm_id}).status_code == 404
     too_early = client.post(f"/api/events/{eid}/correct-date",
                             json={"new_event_date": "2026-08-01", "reason": "x", "actor_user_id": pm_id})
@@ -2126,12 +2184,15 @@ def test_api_cancel_event_and_correctable_listing(client, supplier_id, pic_id, p
 
     # RECEIVING sekarang punya turunan (Sortasi) -> tidak lagi boleh dibatalkan;
     # Sortasi sendiri belum punya turunan lagi -> masih boleh (satu-satunya di daftar).
+    client.login_as(pm_id)
     blocked = client.post(f"/api/events/{rid}/cancel", json={"actor_user_id": pm_id, "reason": "coba batalkan"})
     assert blocked.status_code == 422
     sort_eid = client.get(f"/api/process-events?event_type=SORTATION&batch_id={bid}").json()[0]["event_id"]
     assert [e["event_id"] for e in client.get("/api/events/correctable", params={"batch_id": bid}).json()] == [sort_eid]
+    client.login_as(pic_id)
     forbidden = client.post(f"/api/events/{sort_eid}/cancel", json={"actor_user_id": pic_id, "reason": "x"})
     assert forbidden.status_code == 403
+    client.login_as(pm_id)
     done = client.post(f"/api/events/{sort_eid}/cancel", json={"actor_user_id": pm_id, "reason": "Sortasi keliru"})
     assert done.status_code == 201 and done.json()["event_type"] == "SORTATION"
     assert client.get(f"/api/process-events?event_type=SORTATION&batch_id={bid}").json()[0]["status"] == "VOID"
@@ -2153,7 +2214,9 @@ def test_api_correct_event_quantity(client, supplier_id, pic_id, pm_id):
     link_id = links[0]["link_id"]
 
     body = {"link_id": link_id, "new_quantity": "25.000", "reason": "Timbangan ulang"}
+    client.login_as(pic_id)
     assert client.post(f"/api/events/{rid}/correct-quantity", json={**body, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm_id)
     assert client.post("/api/events/9999/correct-quantity", json={**body, "actor_user_id": pm_id}).status_code == 404
     bad_qty = client.post(f"/api/events/{rid}/correct-quantity",
                           json={**body, "new_quantity": "0", "actor_user_id": pm_id})
@@ -2186,6 +2249,7 @@ def test_api_blocking_chain_manual_cascade(client, supplier_id, pic_id, pm_id):
     assert recv_chain["blocked"] is True
     assert [e["event_id"] for e in recv_chain["chain"]] == [sort_eid]
 
+    client.login_as(pm_id)
     blocked = client.post(f"/api/events/{rid}/cancel", json={"actor_user_id": pm_id, "reason": "coba langsung"})
     assert blocked.status_code == 422
 
@@ -2215,7 +2279,9 @@ def test_api_jenis_correction_cascade(client, supplier_id, pic_id, pm_id):
     assert prev["ok"] is True and prev["changes"][0]["new_batch_number"] == "01" + old_no[2:]
 
     body = {"new_jenis_code": "01", "reason": "Salah pilih jenis"}
+    client.login_as(pic_id)
     assert client.post(f"/api/batches/{bid}/correct-jenis", json={**body, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm_id)
     ok = client.post(f"/api/batches/{bid}/correct-jenis", json={**body, "actor_user_id": pm_id})
     assert ok.status_code == 201, ok.text
     assert ok.json()["notice"] and ok.json()["plan"]["ok"] is True
@@ -2230,12 +2296,15 @@ def test_api_correct_event_notes(client, supplier_id, pic_id, pm_id):
         "event_date": "2026-09-01", "pic_user_id": pic_id, "supplier_id": supplier_id,
         "batch_type": "RAW_KERING", "net_quantity": "20.000"})
     rid = r.json()["event"]["event_id"]
+    client.login_as(pm_id)
     plain = client.post(f"/api/events/{rid}/correct-notes",
                         json={"new_notes": "teks biasa", "reason": "x", "actor_user_id": pm_id})
     assert plain.status_code == 422  # catatan Receiving berupa objek JSON -> harus tetap objek
     new_notes = '{"net_weight": "20.000", "keterangan": "Catatan terkoreksi"}'
     body = {"new_notes": new_notes, "reason": "Salah tulis"}
+    client.login_as(pic_id)
     assert client.post(f"/api/events/{rid}/correct-notes", json={**body, "actor_user_id": pic_id}).status_code == 403
+    client.login_as(pm_id)
     assert client.post("/api/events/9999/correct-notes", json={**body, "actor_user_id": pm_id}).status_code == 404
     ok = client.post(f"/api/events/{rid}/correct-notes", json={**body, "actor_user_id": pm_id})
     assert ok.status_code == 201 and ok.json()["new_notes"] == new_notes

@@ -13,24 +13,29 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..exceptions import (
+    ActorMismatchError,
     EventDateOrderError,
     InsufficientStockError,
     BulkReturnConfirmError,
+    InvalidCredentialsError,
     InvalidEventStructureError,
+    NotLoggedInError,
     QuantityReconciliationError,
     TraceabilityError,
     UnauthorizedAdjustmentError,
     UnauthorizedDispositionError,
 )
 from .database import init_db
+from .dependencies import get_current_user
 from .routers import (
     aa_chain,
     adjustment,
+    auth,
     batches,
     curing,
     delivery,
@@ -121,6 +126,24 @@ async def _date_order_handler(request: Request, exc: EventDateOrderError):
     })
 
 
+@app.exception_handler(NotLoggedInError)
+async def _not_logged_in_handler(request: Request, exc: NotLoggedInError):
+    # Fase 47: dependency global (lihat include_router di bawah) melempar
+    # ini kalau cookie session_token tidak ada/kedaluwarsa/dicabut.
+    return _error_response(401, "not_logged_in", exc)
+
+
+@app.exception_handler(InvalidCredentialsError)
+async def _invalid_credentials_handler(request: Request, exc: InvalidCredentialsError):
+    return _error_response(401, "invalid_credentials", exc)
+
+
+@app.exception_handler(ActorMismatchError)
+async def _actor_mismatch_handler(request: Request, exc: ActorMismatchError):
+    # Fase 47: actor_user_id di body tidak sama dengan user yang login.
+    return _error_response(403, "actor_mismatch", exc)
+
+
 @app.exception_handler(TraceabilityError)
 async def _domain_handler(request: Request, exc: TraceabilityError):
     return _error_response(422, "domain_error", exc)
@@ -135,27 +158,36 @@ async def _value_error_handler(request: Request, exc: ValueError):
 
 
 api_prefix = "/api"
-app.include_router(master_data.router, prefix=api_prefix)
-app.include_router(receiving.router, prefix=api_prefix)
-app.include_router(qc_md.router, prefix=api_prefix)
-app.include_router(steam_dry.router, prefix=api_prefix)
-app.include_router(curing.router, prefix=api_prefix)
-app.include_router(sortation.router, prefix=api_prefix)
-app.include_router(mixing.router, prefix=api_prefix)
-app.include_router(powder.router, prefix=api_prefix)
-app.include_router(rework.router, prefix=api_prefix)
-app.include_router(vacuum_packing.router, prefix=api_prefix)
-app.include_router(delivery.router, prefix=api_prefix)
-app.include_router(adjustment.router, prefix=api_prefix)
-app.include_router(stock.router, prefix=api_prefix)
-app.include_router(traceability.router, prefix=api_prefix)
-app.include_router(rendemen.router, prefix=api_prefix)
-app.include_router(aa_chain.router, prefix=api_prefix)
-app.include_router(date_order.router, prefix=api_prefix)
-app.include_router(disposition.router, prefix=api_prefix)
-app.include_router(supplier_returns.router, prefix=api_prefix)
-app.include_router(event_correction.router, prefix=api_prefix)
-app.include_router(batches.router, prefix=api_prefix)
+# Fase 47: setiap router di bawah ini mensyaratkan sesi login valid --
+# dipasang lewat `dependencies=` di include_router (bukan mengubah
+# signature tiap endpoint satu per satu). `auth.router` sengaja dikecualikan
+# karena `POST /auth/login` sendiri harus bisa diakses tanpa sesi (endpoint
+# lain di dalamnya yang butuh sesi -- /auth/me, /auth/logout,
+# /auth/change-password, /auth/users/{id}/credentials -- sudah menyatakan
+# `Depends(get_current_user)` sendiri-sendiri di routers/auth.py).
+_login_required = [Depends(get_current_user)]
+app.include_router(auth.router, prefix=api_prefix)
+app.include_router(master_data.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(receiving.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(qc_md.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(steam_dry.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(curing.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(sortation.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(mixing.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(powder.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(rework.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(vacuum_packing.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(delivery.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(adjustment.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(stock.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(traceability.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(rendemen.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(aa_chain.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(date_order.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(disposition.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(supplier_returns.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(event_correction.router, prefix=api_prefix, dependencies=_login_required)
+app.include_router(batches.router, prefix=api_prefix, dependencies=_login_required)
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="static")

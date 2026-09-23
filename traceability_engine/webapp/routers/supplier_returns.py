@@ -8,12 +8,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ...models import ProcessEvent
+from ...models import ProcessEvent, User
 from ...services.supplier_return import (
     bulk_confirm_returns, cancel_return_confirmation, confirm_return_received, list_return_history,
     list_supplier_returns, supplier_return_reminders,
 )
 from ..database import get_db
+from ..dependencies import get_current_user, require_actor_matches
 from ..schemas import (
     SupplierReturnBulkConfirm, SupplierReturnCancel, SupplierReturnConfirm, SupplierReturnHistoryOut,
     SupplierReturnReceiptOut, SupplierReturnRemindersOut,
@@ -49,9 +50,14 @@ def get_supplier_return_reminders(db: Session = Depends(get_db)):
     response_model=list[SupplierReturnReceiptOut],
     status_code=201,
 )
-def bulk_confirm_supplier_returns(payload: SupplierReturnBulkConfirm, db: Session = Depends(get_db)):
+def bulk_confirm_supplier_returns(
+    payload: SupplierReturnBulkConfirm,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Fase 41: konfirmasi banyak retur sekaligus (Production Manager saja,
     satu tanggal terima, semua-atau-tidak-sama-sekali)."""
+    require_actor_matches(payload.actor_user_id, current_user)
     receipts = bulk_confirm_returns(
         db, event_ids=payload.event_ids, received_date=payload.received_date,
         actor_user_id=payload.actor_user_id, note=payload.note)
@@ -65,8 +71,12 @@ def bulk_confirm_supplier_returns(payload: SupplierReturnBulkConfirm, db: Sessio
     status_code=201,
 )
 def confirm_supplier_return_received(
-    event_id: int, payload: SupplierReturnConfirm, db: Session = Depends(get_db)
+    event_id: int,
+    payload: SupplierReturnConfirm,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     receipt = confirm_return_received(
@@ -86,9 +96,13 @@ def confirm_supplier_return_received(
     status_code=201,
 )
 def cancel_supplier_return_confirmation(
-    event_id: int, payload: SupplierReturnCancel, db: Session = Depends(get_db)
+    event_id: int,
+    payload: SupplierReturnCancel,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Fase 40: batalkan konfirmasi diterima (hanya Production Manager, alasan wajib)."""
+    require_actor_matches(payload.actor_user_id, current_user)
     if db.get(ProcessEvent, event_id) is None:
         raise HTTPException(404, f"Event {event_id} not found")
     entry = cancel_return_confirmation(
