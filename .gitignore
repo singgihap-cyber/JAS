@@ -5,4 +5,5 @@ __pycache__/
 .venv/
 PROJECT_STATUS.md
 *.db
+import_report.txt
 
