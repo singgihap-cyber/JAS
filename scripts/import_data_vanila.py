@@ -30,9 +30,22 @@ a batch's on-hand quantity and raise spurious `InsufficientStockError`s.
 Per-row failures (unparseable stage, missing linked batch, reconciliation
 error, or any other `ValueError`) are caught, logged to the report, and
 skipped -- the import never aborts on one bad row (user-confirmed policy:
-"dokumentasikan & lanjut", not "stop and ask"). Every decision below that
-isn't already pinned down by the existing `services/*.py` docstrings is a
-NEW decision made by this script and is called out explicitly.
+"dokumentasikan & lanjut", not "stop and ask"). Critically, each row's
+`record_*()` call is caught ONLY by the single `except` wrapping the whole
+`session.begin_nested()` savepoint in `main()`, never by a try/except
+inside a `collect_*` row handler -- `record_process_event()` flushes the
+new `ProcessEvent` row (assigning its id) *before* creating its
+input/output links, so a failure partway through (e.g.
+`InsufficientStockError` on one output) leaves a committed, linkless
+"ghost" event if the surrounding exception is swallowed anywhere short of
+that savepoint. An earlier version of this script caught exceptions inside
+each row handler for a friendlier log message and, as a direct result,
+left 25 such ghost events (empty `EventBatchLink` set, but a real id and
+`notes`) sitting in the committed database -- found by cross-checking
+`ProcessEvent` counts per `event_type` against this report's own "Imported"
+tally, which didn't match. Every decision below that isn't already pinned
+down by the existing `services/*.py` docstrings is a NEW decision made by
+this script and is called out explicitly.
 
 New decisions (documented, not guessed):
 
@@ -325,21 +338,18 @@ def collect_pb(ws, reg_placeholder, report: Report) -> list[PendingEvent]:
                desc=_s(desc), kemasan=_s(kemasan), coly=coly, bruto=_d(bruto),
                tara=_d(tara), net=net, onspec=_d(onspec), offspec=_d(offspec),
                smell=smell, pic=_s(pic), event_date=event_date, row_no=i):
-            try:
-                supplier_id = registry.supplier_id(supplier_name, hint_batch_number=batch)
-                ev = record_receiving(session, ReceivingInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    supplier_id=supplier_id, batch_type=BatchType.RAW_KERING,
-                    net_quantity=net, batch_number=batch, product_description=desc,
-                    packaging_condition=kemasan, coly=int(coly) if coly else None,
-                    gross_weight=bruto, tare_weight=tara, on_spec_qty=onspec,
-                    off_spec_qty=offspec, smell_test=smell,
-                ))
-                out_batch = next(l.batch for l in ev.links)
-                registry.remember_batch(batch, out_batch.batch_id)
-                report.ok("PB")
-            except Exception as e:
-                report.skip("PB", row_no, batch, f"{type(e).__name__}: {e}")
+            supplier_id = registry.supplier_id(supplier_name, hint_batch_number=batch)
+            ev = record_receiving(session, ReceivingInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                supplier_id=supplier_id, batch_type=BatchType.RAW_KERING,
+                net_quantity=net, batch_number=batch, product_description=desc,
+                packaging_condition=kemasan, coly=int(coly) if coly else None,
+                gross_weight=bruto, tare_weight=tara, on_spec_qty=onspec,
+                off_spec_qty=offspec, smell_test=smell,
+            ))
+            out_batch = next(l.batch for l in ev.links)
+            registry.remember_batch(batch, out_batch.batch_id)
+            report.ok("PB")
 
         out.append(PendingEvent(event_date, RANK_PB, "PB", i, fn, str(batch)))
     return out
@@ -373,15 +383,12 @@ def collect_qt(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("QT", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_qc_test(session, QCTestInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    batch_id=batch_id, stage=stage, sample_received_date=recv,
-                    sample_weight=sample_w, ka_1=ka1, ka_2=ka2, ka_3=ka3, aw=aw,
-                ))
-                report.ok("QT")
-            except Exception as e:
-                report.skip("QT", row_no, batch, f"{type(e).__name__}: {e}")
+            record_qc_test(session, QCTestInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                batch_id=batch_id, stage=stage, sample_received_date=recv,
+                sample_weight=sample_w, ka_1=ka1, ka_2=ka2, ka_3=ka3, aw=aw,
+            ))
+            report.ok("QT")
 
         rank = RANK_QT_FP if stage is QCStage.FP else RANK_QT
         out.append(PendingEvent(event_date, rank, "QT", i, fn, str(batch)))
@@ -413,16 +420,13 @@ def collect_md(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("MD", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_metal_detection(session, MetalDetectionInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    batch_id=batch_id, stage=stage,
-                    finding=_s(finding) if finding is not None else None,
-                    description=ket,
-                ))
-                report.ok("MD")
-            except Exception as e:
-                report.skip("MD", row_no, batch, f"{type(e).__name__}: {e}")
+            record_metal_detection(session, MetalDetectionInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                batch_id=batch_id, stage=stage,
+                finding=_s(finding) if finding is not None else None,
+                description=ket,
+            ))
+            report.ok("MD")
 
         rank = RANK_MD_FP if stage is QCStage.FP else RANK_MD
         out.append(PendingEvent(event_date, rank, "MD", i, fn, str(batch)))
@@ -455,17 +459,14 @@ def collect_steam(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("STEAM", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_steaming(session, SteamingInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    batch_id=batch_id, event_time=start, end_time=end,
-                    pan_count=int(pan) if pan else None, water_condition=water,
-                    pan_condition=pancond, verification_reading_1=v1,
-                    verification_reading_2=v2, verification_reading_3=v3,
-                ))
-                report.ok("STEAM")
-            except Exception as e:
-                report.skip("STEAM", row_no, batch, f"{type(e).__name__}: {e}")
+            record_steaming(session, SteamingInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                batch_id=batch_id, event_time=start, end_time=end,
+                pan_count=int(pan) if pan else None, water_condition=water,
+                pan_condition=pancond, verification_reading_1=v1,
+                verification_reading_2=v2, verification_reading_3=v3,
+            ))
+            report.ok("STEAM")
 
         out.append(PendingEvent(event_date, RANK_STEAM, "STEAM", i, fn, str(batch)))
     return out
@@ -494,15 +495,12 @@ def collect_sd(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("SD", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_sundrying(session, SundryingInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    batch_id=batch_id, final_quantity=final, starting_quantity=starting,
-                    starting_ka=ka, drying_duration=durasi,
-                ))
-                report.ok("SD")
-            except Exception as e:
-                report.skip("SD", row_no, batch, f"{type(e).__name__}: {e}")
+            record_sundrying(session, SundryingInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                batch_id=batch_id, final_quantity=final, starting_quantity=starting,
+                starting_ka=ka, drying_duration=durasi,
+            ))
+            report.ok("SD")
 
         out.append(PendingEvent(event_date, RANK_SD, "SD", i, fn, str(batch)))
     return out
@@ -533,15 +531,12 @@ def collect_sort(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("SORT", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_sortation(session, SortationInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    batch_id=batch_id, initial_qty=initial, end_date=end_date,
-                    gourmet_qty=gourmet, eg_qty=eg, ep_qty=ep, nc_qty=nc, powder_qty=powder,
-                ))
-                report.ok("SORT")
-            except Exception as e:
-                report.skip("SORT", row_no, batch, f"{type(e).__name__}: {e}")
+            record_sortation(session, SortationInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                batch_id=batch_id, initial_qty=initial, end_date=end_date,
+                gourmet_qty=gourmet, eg_qty=eg, ep_qty=ep, nc_qty=nc, powder_qty=powder,
+            ))
+            report.ok("SORT")
 
         out.append(PendingEvent(event_date, RANK_SORT, "SORT", i, fn, str(batch)))
     return out
@@ -577,28 +572,25 @@ def collect_mix(ws, report: Report) -> list[PendingEvent]:
                     report.skip("MIX", row_no, bn, "batch sumber tidak ditemukan")
                     return
                 specs.append(MixingSource(batch_id=bid, quantity=qty))
-            try:
-                ev = record_mixing(session, MixingInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    sources=specs, final_qty=final, product_description=desk or "",
-                ))
-                out_link = next(l for l in ev.links if l.batch_id not in {s.batch_id for s in specs})
-                if gabungan:
-                    out_batch = out_link.batch
-                    out_batch.batch_number = gabungan
-                    try:
-                        parsed = batch_number_mod.parse(gabungan)
-                        out_batch.jenis_code = parsed.jenis_code
-                        out_batch.grade_code = parsed.grade_code
-                        out_batch.supplier_code = parsed.supplier_code
-                        out_batch.receiving_date = parsed.receiving_date
-                        out_batch.process_code = parsed.process_code
-                    except ValueError:
-                        pass
-                registry.remember_batch(gabungan, out_link.batch_id)
-                report.ok("MIX")
-            except Exception as e:
-                report.skip("MIX", row_no, gabungan or "?", f"{type(e).__name__}: {e}")
+            ev = record_mixing(session, MixingInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                sources=specs, final_qty=final, product_description=desk or "",
+            ))
+            out_link = next(l for l in ev.links if l.batch_id not in {s.batch_id for s in specs})
+            if gabungan:
+                out_batch = out_link.batch
+                out_batch.batch_number = gabungan
+                try:
+                    parsed = batch_number_mod.parse(gabungan)
+                    out_batch.jenis_code = parsed.jenis_code
+                    out_batch.grade_code = parsed.grade_code
+                    out_batch.supplier_code = parsed.supplier_code
+                    out_batch.receiving_date = parsed.receiving_date
+                    out_batch.process_code = parsed.process_code
+                except ValueError:
+                    pass
+            registry.remember_batch(gabungan, out_link.batch_id)
+            report.ok("MIX")
 
         out.append(PendingEvent(gd, RANK_MIX, "MIX", gsr, fn, str(gabungan)))
         group, group_date, group_start_row = [], None, None
@@ -649,14 +641,11 @@ def collect_vc(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("VC", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_vacuum(session, VacuumInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    batch_id=batch_id, plastic_lines=lines, product_description=desk, buyer=buyer,
-                ))
-                report.ok("VC")
-            except Exception as e:
-                report.skip("VC", row_no, batch, f"{type(e).__name__}: {e}")
+            record_vacuum(session, VacuumInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                batch_id=batch_id, plastic_lines=lines, product_description=desk, buyer=buyer,
+            ))
+            report.ok("VC")
 
         out.append(PendingEvent(d["event_date"], RANK_VC, "VC", d["row_no"], fn, str(d["batch"])))
 
@@ -702,20 +691,17 @@ def collect_pack(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("PACK", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                ev = record_packing(session, PackingInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    sources=[PackingSource(batch_id=batch_id, quantity=netto)],
-                    gross_weight=bruto, plastic_size=ukuran, plastic_lot=lot_plastik,
-                    plastic_qty=qty_plastik, carton_lot=lot_karton, carton_qty=qty_karton,
-                    envelope_qty=amplop, shipping_number=nomor, destination=tujuan,
-                    product_description=desk, buyer=pembeli,
-                ))
-                out_link = next(l for l in ev.links if l.batch_id != batch_id)
-                registry.remember_batch(None, out_link.batch_id)  # unlabeled, not referenceable by number
-                report.ok("PACK")
-            except Exception as e:
-                report.skip("PACK", row_no, batch, f"{type(e).__name__}: {e}")
+            ev = record_packing(session, PackingInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                sources=[PackingSource(batch_id=batch_id, quantity=netto)],
+                gross_weight=bruto, plastic_size=ukuran, plastic_lot=lot_plastik,
+                plastic_qty=qty_plastik, carton_lot=lot_karton, carton_qty=qty_karton,
+                envelope_qty=amplop, shipping_number=nomor, destination=tujuan,
+                product_description=desk, buyer=pembeli,
+            ))
+            out_link = next(l for l in ev.links if l.batch_id != batch_id)
+            registry.remember_batch(None, out_link.batch_id)  # unlabeled, not referenceable by number
+            report.ok("PACK")
 
         out.append(PendingEvent(event_date, RANK_PACK, "PACK", i, fn, str(batch)))
     return out
@@ -748,18 +734,15 @@ def collect_pd(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("PD", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_delivery(session, DeliveryInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    sources=[DeliverySource(batch_id=batch_id, quantity=netto)],
-                    gross_weight=bruto, shipping_number=nomor, destination=lokasi,
-                    recipient=perusahaan, expedition=ekspedisi,
-                    transport_condition=kondisi_angkut, packaging_condition=kondisi_kemasan,
-                    coly=int(coly) if coly else None,
-                ))
-                report.ok("PD")
-            except Exception as e:
-                report.skip("PD", row_no, batch, f"{type(e).__name__}: {e}")
+            record_delivery(session, DeliveryInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                sources=[DeliverySource(batch_id=batch_id, quantity=netto)],
+                gross_weight=bruto, shipping_number=nomor, destination=lokasi,
+                recipient=perusahaan, expedition=ekspedisi,
+                transport_condition=kondisi_angkut, packaging_condition=kondisi_kemasan,
+                coly=int(coly) if coly else None,
+            ))
+            report.ok("PD")
 
         out.append(PendingEvent(event_date, RANK_PD, "PD", i, fn, str(batch)))
     return out
@@ -788,18 +771,15 @@ def collect_smpd(ws, report: Report) -> list[PendingEvent]:
             if batch_id is None:
                 report.skip("SmpD", row_no, batch, "batch tidak ditemukan")
                 return
-            try:
-                record_sample_delivery(session, DeliveryInput(
-                    event_date=event_date, pic_user_id=registry.user_id(pic),
-                    sources=[DeliverySource(batch_id=batch_id, quantity=netto)],
-                    gross_weight=bruto, shipping_number=nomor, destination=alamat,
-                    recipient=tujuan, expedition=ekspedisi, transport_condition=kondisi_angkut,
-                    packaging_condition=kondisi_kemasan, coly=int(coly) if coly else None,
-                    description=deskripsi,
-                ))
-                report.ok("SmpD")
-            except Exception as e:
-                report.skip("SmpD", row_no, batch, f"{type(e).__name__}: {e}")
+            record_sample_delivery(session, DeliveryInput(
+                event_date=event_date, pic_user_id=registry.user_id(pic),
+                sources=[DeliverySource(batch_id=batch_id, quantity=netto)],
+                gross_weight=bruto, shipping_number=nomor, destination=alamat,
+                recipient=tujuan, expedition=ekspedisi, transport_condition=kondisi_angkut,
+                packaging_condition=kondisi_kemasan, coly=int(coly) if coly else None,
+                description=deskripsi,
+            ))
+            report.ok("SmpD")
 
         out.append(PendingEvent(event_date, RANK_PD, "SmpD", i, fn, str(batch)))
     return out
